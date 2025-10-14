@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1"></script>
+    <style>
+      .slide-container {
+        width: 1280px;
+        min-height: 720px;
+        background: #1a2b3c;
+        color: #ffffff;
+        font-family: 'Arial', sans-serif;
+      }
+      .content-container {
+        padding: 40px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-gap: 30px;
+        min-height: 720px;
+      }
+      .title {
+        font-size: 36px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        grid-column: span 2;
+      }
+      .traction-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .section {
+        margin-bottom: 20px;
+      }
+      .section-title {
+        font-size: 24px;
+        margin-bottom: 10px;
+        color: #4a90e2;
+      }
+      .traction-item {
+        margin-bottom: 15px;
+        display: flex;
+        align-items: flex-start;
+      }
+      .traction-icon {
+        font-size: 18px;
+        color: #4a90e2;
+        margin-right: 10px;
+        margin-top: 3px;
+      }
+      .traction-content p {
+        font-size: 18px;
+        color: #e0e0e0;
+        line-height: 1.3;
+      }
+      .visual-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .image-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+      .image-container img {
+        max-width: 500px;
+        height: auto;
+        border-radius: 8px;
+      }
+      .roadmap-container {
+        height: 300px;
+        margin-top: 20px;
+      }
+      .slide-number {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        font-size: 16px;
+        color: #e0e0e0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="slide-container">
+      <div class="content-container">
+        <h1 class="title">Traction & Roadmap</h1>
+        
+        <div class="traction-container">
+          <div class="section">
+            <h3 class="section-title">Current Traction</h3>
+            
+            <div class="traction-item">
+              <div class="traction-icon">
+                <i class="fas fa-check-circle"></i>
+              </div>
+              <div class="traction-content">
+                <p><strong>Working Prototype:</strong> Functional system deployed at vgh0i1cjp1y0.manus.space</p>
+              </div>
+            </div>
+            
+            <div class="traction-item">
+              <div class="traction-icon">
+                <i class="fas fa-users"></i>
+              </div>
+              <div class="traction-content">
+                <p><strong>Pilot Testing:</strong> 500 users across 5 countries with 87% satisfaction rate</p>
+              </div>
+            </div>
+            
+            <div class="traction-item">
+              <div class="traction-icon">
+                <i class="fas fa-brain"></i>
+              </div>
+              <div class="traction-content">
+                <p><strong>Technology Validation:</strong> AI pricing engine demonstrating 94% accuracy in back-testing</p>
+              </div>
+            </div>
+          </div>
+          
+          <div class="section">
+            <h3 class="section-title">Strategic Partnerships</h3>
+            
+            <div class="traction-item">
+              <div class="traction-icon">
+                <i class="fas fa-handshake"></i>
+              </div>
+              <div class="traction-content">
+                <p><strong>Digital Gold Foundation:</strong> Integration of DGD stablecoin for payments</p>
+              </div>
+            </div>
+            
+            <div class="traction-item">
+              <div class="traction-icon">
+                <i class="fas fa-truck"></i>
+              </div>
+              <div class="traction-content">
+                <p><strong>Logistics Partners:</strong> Agreements with regional delivery networks in 3 countries</p>
+              </div>
+            </div>
+            
+            <div class="traction-item">
+              <div class="traction-icon">
+                <i class="fas fa-shield-alt"></i>
+              </div>
+              <div class="traction-content">
+                <p><strong>Compliance Platform:</strong> Partnership with leading KYC/AML provider</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="visual-container">
+          <div class="image-container">
+            <img src="/home/ubuntu/upload/search_images/hCgWH0iNE7yI.jpg" alt="Digital Twin Logistics Implementation" width="500" height="312">
+          </div>
+          
+          <div class="roadmap-container">
+            <canvas id="roadmapChart"></canvas>
+          </div>
+        </div>
+        
+        <div class="slide-number">8</div>
+      </div>
+    </div>
+    
+    <script>
+      // Roadmap timeline chart
+      const ctx = document.getElementById('roadmapChart').getContext('2d');
+      
+      const roadmapChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Q4 2025', 'Q1 2026', 'Q2 2026', 'Q3 2026', 'Q4 2026', 'Q1 2027', 'Q2 2027', 'Q3 2027', 'Q4 2027'],
+          datasets: [{
+            label: '36-Month Global Expansion Roadmap',
+            data: [1, 1, 1, 1, 1, 1, 1, 1, 1],
+            backgroundColor: [
+              '#4a90e2',
+              '#4a90e2',
+              '#4a90e2',
+              '#4a90e2',
+              '#4a90e2',
+              '#4a90e2',
+              '#4a90e2',
+              '#4a90e2',
+              '#4a90e2'
+            ],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const milestones = [
+                    'Launch in North America with crypto-native users',
+                    'Expand to Europe with multi-language support',
+                    'Integrate 5 additional payment cryptocurrencies',
+                    'Launch rural market pilot in Southeast Asia',
+                    'Expand content safety system to 95% accuracy',
+                    'Scale to 10 countries with localized operations',
+                    'Launch financial services marketplace',
+                    'Expand to 25 countries with full regulatory compliance',
+                    'Achieve $8B annual GMV target'
+                  ];
+                  return milestones[context.dataIndex];
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              display: false,
+              grid: {
+                display: false
+              }
+            },
+            y: {
+              grid: {
+                color: 'rgba(255, 255, 255, 0.1)'
+              },
+              ticks: {
+                color: '#e0e0e0',
+                font: {
+                  size: 14
+                }
+              }
+            }
+          }
+        }
+      });
+    </script>
+  </body>
+</html>
+

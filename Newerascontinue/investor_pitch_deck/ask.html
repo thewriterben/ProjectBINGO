@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1"></script>
+    <style>
+      .slide-container {
+        width: 1280px;
+        min-height: 720px;
+        background: #1a2b3c;
+        color: #ffffff;
+        font-family: 'Arial', sans-serif;
+      }
+      .content-container {
+        padding: 40px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-gap: 30px;
+        min-height: 720px;
+      }
+      .title {
+        font-size: 36px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        grid-column: span 2;
+      }
+      .investment-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .section {
+        margin-bottom: 25px;
+      }
+      .section-title {
+        font-size: 24px;
+        margin-bottom: 10px;
+        color: #4a90e2;
+      }
+      .highlight-text {
+        font-size: 28px;
+        font-weight: bold;
+        color: #ffffff;
+        margin-bottom: 10px;
+      }
+      .detail-text {
+        font-size: 20px;
+        color: #e0e0e0;
+        line-height: 1.4;
+        margin-bottom: 5px;
+      }
+      .next-steps {
+        margin-top: 20px;
+      }
+      .step-item {
+        display: flex;
+        align-items: flex-start;
+        margin-bottom: 10px;
+      }
+      .step-icon {
+        font-size: 18px;
+        color: #4a90e2;
+        margin-right: 10px;
+        margin-top: 3px;
+      }
+      .step-text {
+        font-size: 18px;
+        color: #e0e0e0;
+      }
+      .chart-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .pie-chart-container {
+        height: 300px;
+        margin-bottom: 20px;
+      }
+      .returns-container {
+        background-color: rgba(74, 144, 226, 0.1);
+        border-radius: 8px;
+        padding: 20px;
+        border-left: 4px solid #4a90e2;
+      }
+      .returns-title {
+        font-size: 22px;
+        color: #4a90e2;
+        margin-bottom: 10px;
+      }
+      .returns-detail {
+        font-size: 18px;
+        color: #e0e0e0;
+        line-height: 1.4;
+        margin-bottom: 10px;
+      }
+      .slide-number {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        font-size: 16px;
+        color: #e0e0e0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="slide-container">
+      <div class="content-container">
+        <h1 class="title">Investment Opportunity</h1>
+        
+        <div class="investment-container">
+          <div class="section">
+            <h3 class="section-title">Funding Request</h3>
+            <p class="highlight-text">$25 Million Series A</p>
+            <p class="detail-text">$100 Million Pre-Money Valuation</p>
+            <p class="detail-text">20% Equity Offering</p>
+          </div>
+          
+          <div class="section">
+            <h3 class="section-title">Use of Funds</h3>
+            <p class="detail-text"><strong>Technology Development (40%):</strong> Enhance AI pricing engine, content safety systems, and blockchain infrastructure</p>
+            <p class="detail-text"><strong>Regulatory Compliance (25%):</strong> Obtain money transmitter licenses and implement compliance systems</p>
+            <p class="detail-text"><strong>Logistics Network (20%):</strong> Build digital twin infrastructure and establish logistics partnerships</p>
+            <p class="detail-text"><strong>Go-to-Market (15%):</strong> Launch marketing campaigns and develop strategic partnerships</p>
+          </div>
+          
+          <div class="next-steps">
+            <h3 class="section-title">Next Steps</h3>
+            <div class="step-item">
+              <div class="step-icon">
+                <i class="fas fa-file-alt"></i>
+              </div>
+              <div class="step-text">
+                Review detailed business plan and technical documentation
+              </div>
+            </div>
+            <div class="step-item">
+              <div class="step-icon">
+                <i class="fas fa-laptop-code"></i>
+              </div>
+              <div class="step-text">
+                Schedule a demo of our working prototype
+              </div>
+            </div>
+            <div class="step-item">
+              <div class="step-icon">
+                <i class="fas fa-handshake"></i>
+              </div>
+              <div class="step-text">
+                Discuss potential investment terms and structure
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="chart-container">
+          <div class="pie-chart-container">
+            <canvas id="fundAllocationChart"></canvas>
+          </div>
+          
+          <div class="returns-container">
+            <h3 class="returns-title">Projected Returns</h3>
+            <p class="returns-detail"><strong>15-25x ROI</strong> over 5-7 years through strategic acquisition or public offering</p>
+            <p class="returns-detail"><strong>Path to $1B+ valuation</strong> based on capturing just 0.1% of global e-commerce market</p>
+            <p class="returns-detail"><strong>Multiple exit options</strong> including strategic acquisition, IPO, or token appreciation</p>
+            <p class="returns-detail"><strong>Potential early liquidity</strong> through secondary markets for qualified investors</p>
+          </div>
+        </div>
+        
+        <div class="slide-number">10</div>
+      </div>
+    </div>
+    
+    <script>
+      // Fund allocation pie chart
+      const ctx = document.getElementById('fundAllocationChart').getContext('2d');
+      const fundAllocationChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: ['Technology Development', 'Regulatory Compliance', 'Logistics Network', 'Go-to-Market'],
+          datasets: [{
+            data: [40, 25, 20, 15],
+            backgroundColor: [
+              '#4a90e2',
+              '#36A2EB',
+              '#9AD0F5',
+              '#CAE6FC'
+            ],
+            borderColor: '#1a2b3c',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                color: '#e0e0e0',
+                padding: 15,
+                font: {
+                  size: 14
+                }
+              }
+            },
+            title: {
+              display: true,
+              text: 'Fund Allocation',
+              color: '#ffffff',
+              font: {
+                size: 18
+              }
+            }
+          }
+        }
+      });
+    </script>
+  </body>
+</html>
+

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1"></script>
+    <style>
+      .slide-container {
+        width: 1280px;
+        min-height: 720px;
+        background: #1a2b3c;
+        color: #ffffff;
+        font-family: 'Arial', sans-serif;
+      }
+      .content-container {
+        padding: 40px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-gap: 30px;
+        min-height: 720px;
+      }
+      .title {
+        font-size: 36px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        grid-column: span 2;
+      }
+      .feature-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .feature-item {
+        margin-bottom: 25px;
+        display: flex;
+        align-items: flex-start;
+      }
+      .feature-icon {
+        font-size: 24px;
+        color: #4a90e2;
+        margin-right: 15px;
+        margin-top: 5px;
+      }
+      .feature-content h3 {
+        font-size: 24px;
+        margin-bottom: 8px;
+        color: #4a90e2;
+      }
+      .feature-content p {
+        font-size: 20px;
+        color: #e0e0e0;
+        line-height: 1.4;
+      }
+      .image-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .image-container img {
+        max-width: 500px;
+        height: auto;
+        border-radius: 8px;
+      }
+      .slide-number {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        font-size: 16px;
+        color: #e0e0e0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="slide-container">
+      <div class="content-container">
+        <h1 class="title">Crypto-Native Architecture</h1>
+        
+        <div class="feature-container">
+          <div class="feature-item">
+            <div class="feature-icon">
+              <i class="fas fa-coins"></i>
+            </div>
+            <div class="feature-content">
+              <h3>Digital Gold Integration</h3>
+              <p>Native support for Digital Gold (DGD), a gold-backed stablecoin that provides stability and bridges traditional finance with digital assets.</p>
+            </div>
+          </div>
+          
+          <div class="feature-item">
+            <div class="feature-icon">
+              <i class="fas fa-bolt"></i>
+            </div>
+            <div class="feature-content">
+              <h3>Instant Settlement</h3>
+              <p>Near-instant cross-border payments (&lt;3 seconds) with minimal fees compared to traditional banking systems that take 2-5 days.</p>
+            </div>
+          </div>
+          
+          <div class="feature-item">
+            <div class="feature-icon">
+              <i class="fas fa-lock"></i>
+            </div>
+            <div class="feature-content">
+              <h3>Smart Contract Escrow</h3>
+              <p>Automated escrow and dispute resolution through smart contracts, eliminating intermediaries and reducing transaction costs.</p>
+            </div>
+          </div>
+          
+          <div class="feature-item">
+            <div class="feature-icon">
+              <i class="fas fa-chart-line"></i>
+            </div>
+            <div class="feature-content">
+              <h3>Financial Services</h3>
+              <p>Integrated staking, yield generation, and DeFi services that create additional revenue streams and user benefits.</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="image-container">
+          <img src="/home/ubuntu/upload/search_images/9VVVSr0rYHQY.jpg" alt="Bitcoin Payment Visualization" width="500" height="333">
+        </div>
+        
+        <div class="slide-number">6</div>
+      </div>
+    </div>
+  </body>
+</html>
+

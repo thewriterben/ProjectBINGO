@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1"></script>
+    <style>
+      .slide-container {
+        width: 1280px;
+        min-height: 720px;
+        background: #1a2b3c;
+        color: #ffffff;
+        font-family: 'Arial', sans-serif;
+      }
+      .content-container {
+        padding: 40px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-gap: 30px;
+        min-height: 720px;
+      }
+      .title {
+        font-size: 36px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        grid-column: span 2;
+      }
+      .tech-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .tech-item {
+        margin-bottom: 25px;
+        display: flex;
+        align-items: flex-start;
+      }
+      .tech-icon {
+        font-size: 24px;
+        color: #4a90e2;
+        margin-right: 15px;
+        margin-top: 5px;
+      }
+      .tech-content h3 {
+        font-size: 24px;
+        margin-bottom: 8px;
+        color: #4a90e2;
+      }
+      .tech-content p {
+        font-size: 20px;
+        color: #e0e0e0;
+        line-height: 1.4;
+      }
+      .tech-metric {
+        font-weight: bold;
+        color: #4a90e2;
+      }
+      .image-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .image-container img {
+        max-width: 500px;
+        height: auto;
+        border-radius: 8px;
+      }
+      .slide-number {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        font-size: 16px;
+        color: #e0e0e0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="slide-container">
+      <div class="content-container">
+        <h1 class="title">Technology Advantage</h1>
+        
+        <div class="tech-container">
+          <div class="tech-item">
+            <div class="tech-icon">
+              <i class="fas fa-brain"></i>
+            </div>
+            <div class="tech-content">
+              <h3>AI Pricing Engine</h3>
+              <p>Proprietary multi-factor analysis system evaluates rarity, demand, supply, and costs to determine optimal market prices with <span class="tech-metric">94% accuracy</span> versus 67% with traditional methods.</p>
+            </div>
+          </div>
+          
+          <div class="tech-item">
+            <div class="tech-icon">
+              <i class="fas fa-shield-alt"></i>
+            </div>
+            <div class="tech-content">
+              <h3>Content Safety System</h3>
+              <p>Multi-modal AI detection combines text, image, and video analysis to achieve <span class="tech-metric">92% accuracy</span> in detecting illegal content—exceeding regulatory requirements across major jurisdictions.</p>
+            </div>
+          </div>
+          
+          <div class="tech-item">
+            <div class="tech-icon">
+              <i class="fas fa-cubes"></i>
+            </div>
+            <div class="tech-content">
+              <h3>Digital Twin Logistics</h3>
+              <p>Real-time digital twin technology integrates IoT and GIS data to improve on-time delivery by <span class="tech-metric">20%</span> and reduce logistics costs by <span class="tech-metric">8%</span>, enabling efficient service to underserved areas.</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="image-container">
+          <img src="/home/ubuntu/upload/search_images/DJYRQl8qi65O.jpg" alt="Digital Twin Supply Chain" width="500" height="290">
+        </div>
+        
+        <div class="slide-number">5</div>
+      </div>
+    </div>
+  </body>
+</html>
+

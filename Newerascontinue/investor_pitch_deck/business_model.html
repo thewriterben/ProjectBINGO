@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1"></script>
+    <style>
+      .slide-container {
+        width: 1280px;
+        min-height: 720px;
+        background: #1a2b3c;
+        color: #ffffff;
+        font-family: 'Arial', sans-serif;
+      }
+      .content-container {
+        padding: 40px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-gap: 30px;
+        min-height: 720px;
+      }
+      .title {
+        font-size: 36px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        grid-column: span 2;
+      }
+      .business-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .section {
+        margin-bottom: 20px;
+      }
+      .section-title {
+        font-size: 24px;
+        margin-bottom: 10px;
+        color: #4a90e2;
+      }
+      .revenue-item {
+        margin-bottom: 10px;
+        display: flex;
+        align-items: flex-start;
+      }
+      .revenue-icon {
+        font-size: 18px;
+        color: #4a90e2;
+        margin-right: 10px;
+        margin-top: 3px;
+      }
+      .revenue-content p {
+        font-size: 18px;
+        color: #e0e0e0;
+        line-height: 1.3;
+      }
+      .metrics-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0 5px;
+      }
+      .metrics-table th {
+        text-align: left;
+        font-size: 16px;
+        color: #4a90e2;
+        padding: 5px 10px;
+      }
+      .metrics-table td {
+        font-size: 16px;
+        color: #e0e0e0;
+        padding: 5px 10px;
+      }
+      .visual-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .image-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+      .image-container img {
+        max-width: 500px;
+        height: auto;
+        border-radius: 8px;
+      }
+      .chart-container {
+        height: 300px;
+        margin-top: 20px;
+      }
+      .slide-number {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        font-size: 16px;
+        color: #e0e0e0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="slide-container">
+      <div class="content-container">
+        <h1 class="title">Business Model</h1>
+        
+        <div class="business-container">
+          <div class="section">
+            <h3 class="section-title">Revenue Streams</h3>
+            
+            <div class="revenue-item">
+              <div class="revenue-icon">
+                <i class="fas fa-percentage"></i>
+              </div>
+              <div class="revenue-content">
+                <p><strong>Transaction Fees:</strong> 1.5-3.5% of GMV (avg. 2.2%)</p>
+              </div>
+            </div>
+            
+            <div class="revenue-item">
+              <div class="revenue-icon">
+                <i class="fas fa-tag"></i>
+              </div>
+              <div class="revenue-content">
+                <p><strong>Listing Fees:</strong> $0.50-$50 per premium listing</p>
+              </div>
+            </div>
+            
+            <div class="revenue-item">
+              <div class="revenue-icon">
+                <i class="fas fa-star"></i>
+              </div>
+              <div class="revenue-content">
+                <p><strong>Subscription Services:</strong> $29-$499 monthly plans</p>
+              </div>
+            </div>
+            
+            <div class="revenue-item">
+              <div class="revenue-icon">
+                <i class="fas fa-coins"></i>
+              </div>
+              <div class="revenue-content">
+                <p><strong>Financial Services:</strong> Crypto exchange, staking, yield</p>
+              </div>
+            </div>
+          </div>
+          
+          <div class="section">
+            <h3 class="section-title">Unit Economics</h3>
+            <table class="metrics-table">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Year 1</th>
+                  <th>Year 3</th>
+                  <th>Year 5</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>CAC</td>
+                  <td>$45</td>
+                  <td>$38</td>
+                  <td>$32</td>
+                </tr>
+                <tr>
+                  <td>LTV</td>
+                  <td>$485</td>
+                  <td>$875</td>
+                  <td>$1,250</td>
+                </tr>
+                <tr>
+                  <td>LTV/CAC</td>
+                  <td>11x</td>
+                  <td>23x</td>
+                  <td>39x</td>
+                </tr>
+                <tr>
+                  <td>Gross Margin</td>
+                  <td>35%</td>
+                  <td>52%</td>
+                  <td>68%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        <div class="visual-container">
+          <div class="image-container">
+            <img src="/home/ubuntu/upload/search_images/LNvuuJ8qthK7.jpg" alt="Crypto Payment Business Model" width="500" height="282">
+          </div>
+          
+          <div class="chart-container">
+            <canvas id="revenueChart"></canvas>
+          </div>
+        </div>
+        
+        <div class="slide-number">7</div>
+      </div>
+    </div>
+    
+    <script>
+      // Revenue projection chart
+      const ctx = document.getElementById('revenueChart').getContext('2d');
+      const revenueChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5'],
+          datasets: [{
+            label: 'Annual Revenue ($ Millions)',
+            data: [1.4, 12, 42, 96, 162],
+            backgroundColor: '#4a90e2',
+            borderColor: '#4a90e2',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              labels: {
+                color: '#e0e0e0'
+              }
+            },
+            title: {
+              display: true,
+              text: 'Projected Revenue Growth',
+              color: '#ffffff',
+              font: {
+                size: 18
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              grid: {
+                color: 'rgba(255, 255, 255, 0.1)'
+              },
+              ticks: {
+                color: '#e0e0e0'
+              }
+            },
+            x: {
+              grid: {
+                color: 'rgba(255, 255, 255, 0.1)'
+              },
+              ticks: {
+                color: '#e0e0e0'
+              }
+            }
+          }
+        }
+      });
+    </script>
+  </body>
+</html>
+
