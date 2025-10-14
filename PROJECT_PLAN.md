@@ -434,7 +434,7 @@ ProjectBINGO/
 For questions, suggestions, or contributions to this project plan, please:
 - Open an issue in the GitHub repository
 - Contact the project maintainers
-- Review the contribution guidelines (coming soon)
+- Review the [contribution guidelines](CONTRIBUTING.md)
 
 ---
 
