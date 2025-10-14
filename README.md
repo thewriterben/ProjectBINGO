@@ -7,12 +7,20 @@ ProjectBINGO is an innovative blockchain-based platform that revolutionizes manu
 
 ## ✨ Key Features
 
+### Core Features
 - **🔗 Blockchain-Based**: Ethereum smart contracts ensure transparent, trustless transactions
 - **🤖 AI-Powered**: Machine learning algorithms for cost estimation, time prediction, and manufacturer matching
 - **🏭 Decentralized Marketplace**: Direct connection between manufacturers and clients
 - **💰 Smart Escrow**: Automated payment release upon order completion
 - **📊 Real-Time Analytics**: Track orders, performance, and marketplace statistics
 - **🔍 Intelligent Matching**: AI-driven manufacturer recommendations based on requirements
+
+### Advanced Features (NEW)
+- **🌐 Multi-Chain Support**: Compatible with Ethereum, Polygon, and Binance Smart Chain
+- **🧠 Deep Learning AI**: NLP parsing, fraud detection, predictive analytics, and recommendations
+- **📡 IoT Integration**: Real-time device tracking, geolocation, and sensor data collection
+- **⚖️ Dispute Resolution**: Comprehensive arbitration, mediation, and evidence management system
+- **📦 Supply Chain**: End-to-end tracking, vendor management, and inventory control
 
 ## 🏗️ Architecture
 
@@ -34,26 +42,45 @@ Frontend (HTML/CSS/JS) ←→ Backend API (Node.js) ←→ Smart Contracts (Soli
 
 ```
 ProjectBINGO/
-├── frontend/                 # Web UI
-│   ├── index.html           # Main interface
-│   ├── app.js              # Frontend logic
-│   └── styles.css          # Styling
-├── backend/                 # API Server
-│   └── server.js           # Express server with Web3 integration
-├── contracts/              # Smart Contracts
-│   └── ManufacturingMarketplace.sol
-├── ai-module/              # AI Services
+├── frontend/                      # Web UI
+│   ├── index.html                # Main interface
+│   ├── app.js                   # Frontend logic
+│   └── styles.css               # Styling
+├── backend/                      # Legacy API Server
+│   └── server.js                # Express server with Web3 integration
+├── contracts/                    # Smart Contracts
+│   ├── ManufacturingMarketplace.sol  # Original contract
+│   └── MultiChainMarketplace.sol     # Multi-chain contract ⭐
+├── services/                     # Microservices Architecture
+│   ├── ai-service/              # AI & ML capabilities ⭐
+│   ├── iot-service/             # IoT device tracking ⭐
+│   ├── dispute-service/         # Dispute resolution ⭐
+│   ├── supply-chain-service/    # Supply chain management ⭐
+│   ├── api-gateway/             # API Gateway
+│   ├── user-service/            # User management
+│   └── order-service/           # Order management
+├── shared/                       # Shared utilities
+│   ├── config/                  # Configuration
+│   │   └── chains.js            # Multi-chain config ⭐
+│   ├── middleware/              # Common middleware
+│   └── utils/                   # Utility functions
+├── ai-module/                    # Python AI Services
 │   └── manufacturing_optimizer.py
-├── docs/                   # Documentation
-│   ├── README.md           # Comprehensive docs
-│   ├── API.md              # API documentation
-│   ├── DEPLOYMENT.md       # Deployment guide
+├── scripts/                      # Deployment scripts
+│   └── deploy-multichain.js     # Multi-chain deployment ⭐
+├── docs/                        # Documentation
+│   ├── README.md                # Complete docs
+│   ├── API.md                   # API documentation
+│   ├── DEPLOYMENT.md            # Deployment guide
+│   ├── ADVANCED_FEATURES.md     # Advanced features ⭐
 │   └── FUTURE_IMPROVEMENTS.md
-├── tests/                  # Test suite
+├── tests/                       # Test suite
 │   └── api.test.js
-├── .env.example            # Environment template
+├── .env.example                 # Environment template
 ├── .gitignore
 └── package.json
+
+⭐ = New advanced features
 ```
 
 ## 📦 Installation
@@ -70,8 +97,15 @@ npm install
 cp .env.example .env
 # Edit .env with your configuration
 
-# Start the backend server
-npm start
+# Start services
+npm start              # API Gateway
+npm run start:ai       # AI Service
+npm run start:iot      # IoT Service
+npm run start:dispute  # Dispute Resolution
+npm run start:supply-chain  # Supply Chain
+
+# Or use Docker
+docker-compose up -d
 
 # Open frontend in browser
 # Serve frontend/index.html with your preferred method
@@ -158,6 +192,7 @@ For detailed documentation, see the `docs/` directory:
 - [Complete Documentation](./docs/README.md)
 - [API Reference](./docs/API.md)
 - [Deployment Guide](./docs/DEPLOYMENT.md)
+- [Advanced Features Guide](./docs/ADVANCED_FEATURES.md) ⭐ NEW
 - [Future Improvements](./docs/FUTURE_IMPROVEMENTS.md)
 
 ## 🔧 Configuration
@@ -207,14 +242,25 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Give a ⭐️ if this project helped you!
 
-## 🔮 Future Roadmap
+## 🔮 Roadmap
 
+### Completed ✅
+- [x] Multi-chain support (Ethereum, Polygon, BSC)
+- [x] Advanced AI features (NLP, fraud detection, recommendations)
+- [x] IoT integration for real-time tracking
+- [x] Dispute resolution system
+- [x] Supply chain integration
+
+### In Progress 🚧
+- [ ] Integration testing for all services
+- [ ] Frontend updates for new features
+- [ ] Production deployment configurations
+
+### Planned 📋
 - [ ] Mobile application (iOS/Android)
-- [ ] Multi-chain support (Polygon, BSC)
-- [ ] Advanced AI features (deep learning)
-- [ ] IoT integration for real-time tracking
-- [ ] Dispute resolution system
-- [ ] Supply chain integration
+- [ ] Advanced analytics dashboard
+- [ ] DAO governance implementation
+- [ ] DeFi integrations
 
 ---
 
