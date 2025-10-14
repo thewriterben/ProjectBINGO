@@ -76,7 +76,7 @@ app.post('/api/v1/ai/match-manufacturers', (req, res) => {
 app.use(errorHandler('ai-service'));
 
 app.listen(PORT, () => {
-  logger.info(\`AI Service started on port \${PORT}\`);
+  logger.info(`AI Service started on port ${PORT}`);
 });
 
 module.exports = app;
