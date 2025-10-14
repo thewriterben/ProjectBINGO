@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: projectbingo-config
+  namespace: projectbingo
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  
+  # Database configuration
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "manufacturing_marketplace"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  MONGODB_URI: "mongodb://mongodb-service:27017"
+  
+  # Service URLs
+  USER_SERVICE_URL: "http://user-service:3001"
+  MANUFACTURER_SERVICE_URL: "http://manufacturer-service:3002"
+  ORDER_SERVICE_URL: "http://order-service:3003"
+  PAYMENT_SERVICE_URL: "http://payment-service:3004"
+  AI_SERVICE_URL: "http://ai-service:3005"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:3006"
+  FILE_SERVICE_URL: "http://file-service:3007"
