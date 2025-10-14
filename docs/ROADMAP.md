@@ -638,10 +638,12 @@ Based on research and requirements, the MVP will include:
 - [PROJECT_PLAN.md](../PROJECT_PLAN.md) - Overall project plan
 - [RESEARCH_SUMMARY.md](RESEARCH_SUMMARY.md) - Research findings
 - [TECHNICAL_REQUIREMENTS.md](TECHNICAL_REQUIREMENTS.md) - Technical specifications
+- [USER_PERSONAS.md](USER_PERSONAS.md) - Target user personas
 - [README.md](../README.md) - Project overview
 
 ### Change Log
 - **2025-10-14**: Initial ROADMAP.md created with comprehensive phased timeline
+- **2025-10-14**: Updated progress tracking - marked ZIP extraction, user personas, and framework documents as complete
 
 ### Notes
 - Timeline estimates are based on full-time team availability

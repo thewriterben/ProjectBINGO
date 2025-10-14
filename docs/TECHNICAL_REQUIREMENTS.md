@@ -684,6 +684,13 @@ PUT    /api/v1/orders/:id/milestones/:milestoneId
 
 ## Appendix
 
+### Related Documents
+- [PROJECT_PLAN.md](../PROJECT_PLAN.md) - Overall project plan
+- [RESEARCH_SUMMARY.md](RESEARCH_SUMMARY.md) - Research findings
+- [ROADMAP.md](ROADMAP.md) - Implementation timeline
+- [USER_PERSONAS.md](USER_PERSONAS.md) - Target user personas
+- [README.md](../README.md) - Project overview
+
 ### Glossary
 - **API**: Application Programming Interface
 - **DID**: Decentralized Identifier

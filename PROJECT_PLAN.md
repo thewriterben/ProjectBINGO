@@ -40,7 +40,8 @@ ProjectBINGO/
 │   ├── QUICK_START.md                # Quick start guide (start here!)
 │   ├── RESEARCH_SUMMARY.md           # Synthesis of research findings
 │   ├── TECHNICAL_REQUIREMENTS.md     # Technical specs and requirements
-│   └── ROADMAP.md                    # Phased implementation timeline
+│   ├── ROADMAP.md                    # Phased implementation timeline
+│   └── USER_PERSONAS.md              # Target user personas and journeys
 ├── Newerascontinue/                   # Additional materials
 │   ├── INDEX.md                      # Materials overview
 │   ├── README.md                     # Package overview
