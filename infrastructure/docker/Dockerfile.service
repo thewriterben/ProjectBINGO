@@ -1,0 +1,26 @@
+# Generic Dockerfile for microservices
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy shared dependencies
+COPY shared/ ./shared/
+
+# Copy package files
+ARG SERVICE_NAME
+COPY services/${SERVICE_NAME}/package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy service code
+COPY services/${SERVICE_NAME}/src ./src/
+
+# Set environment
+ENV NODE_ENV=production
+
+# Expose port
+EXPOSE 3000
+
+# Start service
+CMD ["node", "src/index.js"]

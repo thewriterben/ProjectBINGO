@@ -1,0 +1,251 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: projectbingo-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: manufacturing_marketplace
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - projectbingo-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: projectbingo-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - projectbingo-network
+
+  # MongoDB for File Storage
+  mongodb:
+    image: mongo:7
+    container_name: projectbingo-mongodb
+    environment:
+      MONGO_INITDB_DATABASE: manufacturing_files
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - projectbingo-network
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: api-gateway
+    container_name: projectbingo-api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - API_GATEWAY_PORT=3000
+      - USER_SERVICE_URL=http://user-service:3001
+      - MANUFACTURER_SERVICE_URL=http://manufacturer-service:3002
+      - ORDER_SERVICE_URL=http://order-service:3003
+      - PAYMENT_SERVICE_URL=http://payment-service:3004
+      - AI_SERVICE_URL=http://ai-service:3005
+      - NOTIFICATION_SERVICE_URL=http://notification-service:3006
+      - FILE_SERVICE_URL=http://file-service:3007
+    depends_on:
+      - user-service
+      - order-service
+    networks:
+      - projectbingo-network
+    restart: unless-stopped
+
+  # User Service
+  user-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: user-service
+    container_name: projectbingo-user-service
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - USER_SERVICE_PORT=3001
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=manufacturing_marketplace
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=your-secret-key-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - projectbingo-network
+    restart: unless-stopped
+
+  # Manufacturer Service
+  manufacturer-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: manufacturer-service
+    container_name: projectbingo-manufacturer-service
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=development
+      - MANUFACTURER_SERVICE_PORT=3002
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=manufacturing_marketplace
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - projectbingo-network
+    restart: unless-stopped
+
+  # Order Service
+  order-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: order-service
+    container_name: projectbingo-order-service
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=development
+      - ORDER_SERVICE_PORT=3003
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=manufacturing_marketplace
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - projectbingo-network
+    restart: unless-stopped
+
+  # Payment Service
+  payment-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: payment-service
+    container_name: projectbingo-payment-service
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=development
+      - PAYMENT_SERVICE_PORT=3004
+      - BLOCKCHAIN_RPC_URL=http://localhost:8545
+    networks:
+      - projectbingo-network
+    restart: unless-stopped
+
+  # AI Service
+  ai-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: ai-service
+    container_name: projectbingo-ai-service
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=development
+      - AI_SERVICE_PORT=3005
+    networks:
+      - projectbingo-network
+    restart: unless-stopped
+
+  # Notification Service
+  notification-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: notification-service
+    container_name: projectbingo-notification-service
+    ports:
+      - "3006:3006"
+    environment:
+      - NODE_ENV=development
+      - NOTIFICATION_SERVICE_PORT=3006
+    networks:
+      - projectbingo-network
+    restart: unless-stopped
+
+  # File Service
+  file-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: file-service
+    container_name: projectbingo-file-service
+    ports:
+      - "3007:3007"
+    environment:
+      - NODE_ENV=development
+      - FILE_SERVICE_PORT=3007
+      - MONGODB_URI=mongodb://mongodb:27017
+      - MONGODB_DB=manufacturing_files
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - projectbingo-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongodb_data:
+
+networks:
+  projectbingo-network:
+    driver: bridge

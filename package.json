@@ -1,19 +1,38 @@
 {
   "name": "project-bingo-manufacturing-marketplace",
-  "version": "1.0.0",
-  "description": "AI-Powered Decentralized Manufacturing Marketplace",
-  "main": "backend/server.js",
+  "version": "2.0.0",
+  "description": "AI-Powered Decentralized Manufacturing Marketplace - Microservices Architecture",
+  "main": "services/api-gateway/src/index.js",
   "scripts": {
-    "start": "node backend/server.js",
+    "start": "node services/api-gateway/src/index.js",
+    "start:gateway": "node services/api-gateway/src/index.js",
+    "start:user": "node services/user-service/src/index.js",
+    "start:order": "node services/order-service/src/index.js",
+    "start:legacy": "node backend/server.js",
+    "dev": "nodemon services/api-gateway/src/index.js",
+    "dev:gateway": "nodemon services/api-gateway/src/index.js",
+    "dev:user": "nodemon services/user-service/src/index.js",
+    "dev:order": "nodemon services/order-service/src/index.js",
     "test": "jest",
-    "dev": "nodemon backend/server.js"
+    "test:unit": "jest --testPathPattern=tests/unit",
+    "test:integration": "jest --testPathPattern=tests/integration",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "migrate": "node infrastructure/docker/migrations/run.js",
+    "lint": "echo 'Linting not configured yet'",
+    "format": "echo 'Formatting not configured yet'"
   },
   "keywords": [
     "blockchain",
     "manufacturing",
     "ai",
     "marketplace",
-    "decentralized"
+    "decentralized",
+    "microservices",
+    "kubernetes",
+    "docker"
   ],
   "author": "Benjamin J. Snider",
   "license": "MIT",
@@ -22,10 +41,20 @@
     "web3": "^4.3.0",
     "axios": "^1.6.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3",
+    "redis": "^4.6.11",
+    "mongodb": "^6.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "joi": "^17.11.0",
+    "helmet": "^7.1.0",
+    "http-proxy-middleware": "^2.0.6",
+    "multer": "^1.4.5-lts.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
-    "jest": "^29.7.0"
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3"
   }
 }
