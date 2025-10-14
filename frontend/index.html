@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manufacturing Marketplace - Decentralized AI-Powered Platform</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <nav class="navbar">
+            <div class="container">
+                <div class="logo">
+                    <h1>🏭 Manufacturing Marketplace</h1>
+                    <p class="tagline">AI-Powered Decentralized Manufacturing</p>
+                </div>
+                <div class="nav-links">
+                    <a href="#dashboard">Dashboard</a>
+                    <a href="#orders">Orders</a>
+                    <a href="#manufacturers">Manufacturers</a>
+                    <a href="#ai-tools">AI Tools</a>
+                    <button id="connectWallet" class="btn-primary">Connect Wallet</button>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Hero Section -->
+        <section class="hero">
+            <div class="container">
+                <h2>Revolutionize Manufacturing with AI & Blockchain</h2>
+                <p>Connect manufacturers with clients through a transparent, efficient, and intelligent marketplace</p>
+                <div class="hero-buttons">
+                    <button class="btn-large btn-primary" onclick="showSection('createOrder')">Create Order</button>
+                    <button class="btn-large btn-secondary" onclick="showSection('manufacturers')">Find Manufacturers</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Stats Section -->
+        <section class="stats-section">
+            <div class="container">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3 id="totalOrders">247</h3>
+                        <p>Total Orders</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="activeManufacturers">32</h3>
+                        <p>Active Manufacturers</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="totalValue">$1.24M</h3>
+                        <p>Total Value Locked</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="avgCompletion">6.5 days</h3>
+                        <p>Avg Completion Time</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Create Order Section -->
+        <section id="createOrder" class="section hidden">
+            <div class="container">
+                <h2>Create Manufacturing Order</h2>
+                <div class="form-container">
+                    <form id="orderForm">
+                        <div class="form-group">
+                            <label for="productName">Product Name</label>
+                            <input type="text" id="productName" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="specifications">Product Specifications</label>
+                            <textarea id="specifications" rows="4" required></textarea>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="quantity">Quantity</label>
+                                <input type="number" id="quantity" min="1" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="material">Material</label>
+                                <select id="material" required>
+                                    <option value="">Select Material</option>
+                                    <option value="steel">Steel</option>
+                                    <option value="aluminum">Aluminum</option>
+                                    <option value="plastic">Plastic</option>
+                                    <option value="wood">Wood</option>
+                                    <option value="composite">Composite</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="length">Length (cm)</label>
+                                <input type="number" id="length" step="0.1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="width">Width (cm)</label>
+                                <input type="number" id="width" step="0.1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="height">Height (cm)</label>
+                                <input type="number" id="height" step="0.1" required>
+                            </div>
+                        </div>
+                        
+                        <div class="ai-estimate" id="aiEstimate" style="display: none;">
+                            <h3>AI Cost Estimation</h3>
+                            <div class="estimate-details">
+                                <p><strong>Estimated Cost:</strong> $<span id="estimatedCost">0</span></p>
+                                <p><strong>Production Time:</strong> <span id="estimatedTime">0</span> days</p>
+                                <p><strong>Confidence:</strong> <span id="confidence">0</span>%</p>
+                            </div>
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button type="button" class="btn-secondary" onclick="getAIEstimate()">Get AI Estimate</button>
+                            <button type="submit" class="btn-primary">Create Order</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- Orders Section -->
+        <section id="orders" class="section">
+            <div class="container">
+                <h2>Manufacturing Orders</h2>
+                <div class="filter-bar">
+                    <select id="statusFilter">
+                        <option value="all">All Status</option>
+                        <option value="pending">Pending</option>
+                        <option value="accepted">Accepted</option>
+                        <option value="inproduction">In Production</option>
+                        <option value="completed">Completed</option>
+                    </select>
+                </div>
+                <div id="ordersList" class="orders-grid">
+                    <!-- Orders will be loaded here -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Manufacturers Section -->
+        <section id="manufacturers" class="section">
+            <div class="container">
+                <h2>Registered Manufacturers</h2>
+                <div id="manufacturersList" class="manufacturers-grid">
+                    <!-- Manufacturers will be loaded here -->
+                </div>
+            </div>
+        </section>
+
+        <!-- AI Tools Section -->
+        <section id="ai-tools" class="section">
+            <div class="container">
+                <h2>AI-Powered Tools</h2>
+                <div class="tools-grid">
+                    <div class="tool-card">
+                        <h3>🤖 Cost Estimator</h3>
+                        <p>Get AI-powered cost estimates for your manufacturing projects</p>
+                        <button class="btn-primary" onclick="showSection('createOrder')">Use Tool</button>
+                    </div>
+                    <div class="tool-card">
+                        <h3>🎯 Manufacturer Matching</h3>
+                        <p>Find the best manufacturers for your specific requirements</p>
+                        <button class="btn-primary" onclick="matchManufacturers()">Use Tool</button>
+                    </div>
+                    <div class="tool-card">
+                        <h3>📊 Production Analytics</h3>
+                        <p>Analyze production efficiency and optimize scheduling</p>
+                        <button class="btn-primary">Use Tool</button>
+                    </div>
+                    <div class="tool-card">
+                        <h3>🔍 Quality Analysis</h3>
+                        <p>AI-driven quality requirement analysis and inspection planning</p>
+                        <button class="btn-primary">Use Tool</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 Manufacturing Marketplace. Built with AI & Blockchain Technology.</p>
+            <p>Powered by Ethereum Smart Contracts & Machine Learning</p>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
