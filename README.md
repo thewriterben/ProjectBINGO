@@ -34,6 +34,9 @@ To revolutionize the manufacturing ecosystem by creating a decentralized platfor
 
 ## 📚 Documentation
 
+### New Here?
+- **[docs/QUICK_START.md](docs/QUICK_START.md)** ⚡ - Quick start guide for new contributors and team members
+
 ### Core Planning Documents
 
 - **[PROJECT_PLAN.md](PROJECT_PLAN.md)** - Comprehensive project plan with all phases, objectives, and milestones

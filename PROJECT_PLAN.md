@@ -33,16 +33,24 @@ To conduct comprehensive research, identify market opportunities, and develop ac
 ProjectBINGO/
 ├── README.md                          # Project introduction and navigation
 ├── PROJECT_PLAN.md                    # This file - comprehensive project plan
+├── CONTRIBUTING.md                    # Contribution guidelines
 ├── LICENSE                            # MIT License
+├── .gitignore                         # Git ignore rules
 ├── docs/                              # Organized documentation
+│   ├── QUICK_START.md                # Quick start guide (start here!)
 │   ├── RESEARCH_SUMMARY.md           # Synthesis of research findings
 │   ├── TECHNICAL_REQUIREMENTS.md     # Technical specs and requirements
 │   └── ROADMAP.md                    # Phased implementation timeline
+├── Newerascontinue/                   # Additional materials
+│   ├── INDEX.md                      # Materials overview
+│   ├── README.md                     # Package overview
+│   ├── investor_pitch_deck/          # HTML pitch slides
+│   └── ...                           # Executive summaries and reports
 ├── Research PDFs/                     # Original research documents
 │   ├── AI-Powered Decentralized Manufacturing Marketplace_ Feasibility and Analysis.pdf
 │   ├── Viability of a Decentralized Manufacturing & Trading Platform.pdf
 │   └── Promising Unfilled Niches in AI, Web3, and Creator_Developer Tools.pdf
-└── Newerascontinue.zip               # Additional materials (pitch deck, reports)
+└── Newerascontinue.zip               # Archived additional materials
 ```
 
 ## Key Research Documents
@@ -410,12 +418,17 @@ ProjectBINGO/
 ### Change Log
 - **2025-10-14**: Initial PROJECT_PLAN.md created with comprehensive structure
 - **2025-10-14**: Defined six project phases with objectives and deliverables
+- **2025-10-14**: Updated repository structure with all documentation files
+- **2025-10-14**: Added references to QUICK_START.md and CONTRIBUTING.md
 
 ### Related Documents
 - [README.md](README.md) - Project introduction
-- [docs/RESEARCH_SUMMARY.md](docs/RESEARCH_SUMMARY.md) - Research findings (coming soon)
-- [docs/TECHNICAL_REQUIREMENTS.md](docs/TECHNICAL_REQUIREMENTS.md) - Technical specs (coming soon)
-- [docs/ROADMAP.md](docs/ROADMAP.md) - Implementation timeline (coming soon)
+- [docs/QUICK_START.md](docs/QUICK_START.md) - Quick start guide for new contributors
+- [docs/RESEARCH_SUMMARY.md](docs/RESEARCH_SUMMARY.md) - Research findings
+- [docs/TECHNICAL_REQUIREMENTS.md](docs/TECHNICAL_REQUIREMENTS.md) - Technical specs
+- [docs/ROADMAP.md](docs/ROADMAP.md) - Implementation timeline
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
+- [Newerascontinue/INDEX.md](Newerascontinue/INDEX.md) - Additional reference materials
 
 ### Contact & Contribution
 For questions, suggestions, or contributions to this project plan, please:
