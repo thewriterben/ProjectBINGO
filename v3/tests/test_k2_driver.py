@@ -32,7 +32,9 @@ def main() -> int:
             license=License(LicenseTemplate.COMMERCIAL_PER_UNIT, per_unit_cents=40),
             split=Split([SplitPayee("acct:ben", 10_000)]))
 
-        driver = K2Driver("127.0.0.1", 7126, confirm=lambda *_: None, say=print)
+        # fake server is single-port, so UI proxy == moonraker port here
+        driver = K2Driver("127.0.0.1", 7126, confirm=lambda *_: None, say=print,
+                          ui_port=7126)
         node = NodeInfo(node_id="n-test", operator="acct:ben-shop", name="fake K2",
                         lat=0, lon=0, tier=1, rate_cents_per_hour=300,
                         machines=[Machine("m1", "Creality K2 Plus", "fdm",

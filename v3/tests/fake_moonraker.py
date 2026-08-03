@@ -61,10 +61,12 @@ def make_handler(state: _State):
                     "heater_bed": {"temperature": 60.1, "target": 60.0},
                 }}})
             elif self.path.startswith("/server/webcams/list"):
+                # relative snapshot_url, exactly like the real K2/Fluidd
                 self._json({"result": {"webcams": [
-                    {"name": "chamber", "snapshot_url": "/snapshot"}]}})
-            elif self.path.startswith("/snapshot"):
-                frame = f"jpegish-{time.time()}".encode()
+                    {"name": "chamber", "snapshot_url": "/webcam/?action=snapshot"}]}})
+            elif self.path.startswith("/webcam/") or self.path.startswith("/snapshot"):
+                # real JPEG magic so camera_preflight passes
+                frame = b"\xff\xd8\xff\xe0" + f"jpeg-{time.time()}".encode() + b"\xff\xd9"
                 self.send_response(200)
                 self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Content-Length", str(len(frame)))

@@ -64,6 +64,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="BINGO node runner — Creality K2 Plus")
     ap.add_argument("--host", required=True, help="printer IP/hostname on your LAN")
     ap.add_argument("--port", type=int, default=7125)
+    ap.add_argument("--ui-port", type=int, default=4408,
+                    help="Fluidd/Mainsail host port that proxies /webcam/ (K2 default 4408)")
+    ap.add_argument("--webcam-url", default=None,
+                    help="explicit snapshot URL override (skips discovery)")
     ap.add_argument("--api-key", default="")
     ap.add_argument("--gcode", help="path to a sliced .gcode file (required with --go)")
     ap.add_argument("--printer-file", help="use an already-proven gcode file that lives "
@@ -81,7 +85,8 @@ def main(argv=None):
                     help="actually upload and print (default is a dry-run check)")
     args = ap.parse_args(argv)
 
-    driver = K2Driver(args.host, args.port, args.api_key)
+    driver = K2Driver(args.host, args.port, args.api_key,
+                      ui_port=args.ui_port, webcam_url=args.webcam_url)
 
     # ── connectivity + state check (always) ─────────────────────────────────
     try:
@@ -91,6 +96,9 @@ def main(argv=None):
         return 1
     print(f"✓ printer: {info.get('hostname', args.host)} — state '{info.get('state')}' "
           f"(klipper {info.get('software_version', '?')})")
+
+    cam_ok, cam_detail = driver.camera_preflight()
+    print(f"{'✓' if cam_ok else '⚠'} {cam_detail}")
 
     if args.printer_file:
         # Proven-file mode: the design IS the gcode that already printed

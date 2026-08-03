@@ -40,14 +40,19 @@ class K2Error(RuntimeError):
 
 class K2Driver:
     def __init__(self, host: str, port: int = 7125, api_key: str = "",
-                 max_hours: float = 12.0, confirm=input, say=print):
+                 max_hours: float = 12.0, confirm=input, say=print,
+                 ui_port: int = 4408, webcam_url: str | None = None):
+        self.host = host
         self.base = f"http://{host}:{port}"
+        self.ui_port = ui_port            # Fluidd/Mainsail host that proxies /webcam/
+        self.webcam_url = webcam_url      # explicit override; skips discovery
         self.headers = {"X-Api-Key": api_key} if api_key else {}
         self.max_hours = max_hours
         self.confirm = confirm            # injectable for tests/unattended
         self.say = say
         self._filename: str | None = None
         self._units_started = 0
+        self._snap_url: str | None = None  # resolved + cached
 
     # ---------------- HTTP helpers (stdlib) ----------------
 
@@ -85,19 +90,52 @@ class K2Driver:
         return res.get("status", {})
 
     def snapshot_url(self) -> str | None:
+        """Resolve the snapshot URL Moonraker advertises. The K2 (Fluidd)
+        advertises a RELATIVE path (/webcam/?action=snapshot) that is proxied
+        by the UI host (:4408), NOT by Moonraker (:7125). Resolve against the
+        UI host, cache the result."""
+        if self._snap_url:
+            return self._snap_url
+        if self.webcam_url:
+            self._snap_url = self.webcam_url
+            return self._snap_url
+        snap = ""
         try:
             res = self._request("/server/webcams/list").get("result", {})
             cams = res.get("webcams", [])
             if cams:
                 snap = cams[0].get("snapshot_url", "")
-                if snap.startswith("http"):
-                    return snap
-                if snap:
-                    return self.base + snap
         except K2Error:
             pass
-        # common K-series fallback (mjpg-streamer style)
-        return self.base.rsplit(":", 1)[0] + ":8080/?action=snapshot"
+        if snap.startswith("http"):
+            self._snap_url = snap
+        elif snap:
+            # relative path → resolve against the UI proxy host, not Moonraker
+            self._snap_url = f"http://{self.host}:{self.ui_port}{snap}"
+        else:
+            self._snap_url = None
+        return self._snap_url
+
+    def camera_preflight(self) -> tuple[bool, str]:
+        """Check the camera BEFORE printing so a down streamer is a loud
+        warning, not silent missing evidence. Returns (ok, detail)."""
+        url = self.snapshot_url()
+        if not url:
+            return False, "no webcam advertised by Moonraker (no FRAME evidence)"
+        try:
+            with urllib.request.urlopen(url, timeout=6) as r:
+                head = r.read(2)
+            if head[:2] == b"\xff\xd8":
+                return True, f"camera OK ({url})"
+            return False, f"{url} responded but not JPEG (streamer misconfigured)"
+        except urllib.error.HTTPError as e:
+            if e.code == 502:
+                return False, (f"camera streamer is DOWN (502 at {url}) — enable the "
+                               f"camera in the K2 UI for FRAME evidence; proceeding "
+                               f"telemetry-only")
+            return False, f"camera error {e.code} at {url}"
+        except Exception as e:
+            return False, f"camera unreachable at {url}: {e}"
 
     def download_gcode(self, filename: str) -> bytes:
         """Fetch an existing file from the printer's gcodes root — used to
@@ -127,6 +165,8 @@ class K2Driver:
         if state != "ready":
             raise K2Error(f"printer state is '{state}', need 'ready' "
                           f"({info.get('state_message', '')})")
+        cam_ok, cam_detail = self.camera_preflight()
+        self.say(f"    [k2] {cam_detail}")
         self._filename = f"bingo_{uuid.uuid4().hex[:8]}.gcode"
         self.upload_gcode(gcode, self._filename)
         self.say(f"    [k2] uploaded {self._filename} "
@@ -134,7 +174,8 @@ class K2Driver:
         return {"gcode_sha256": hashlib.sha256(gcode).hexdigest(),
                 "machine_hostname": info.get("hostname", ""),
                 "klipper_version": info.get("software_version", ""),
-                "filename": self._filename}
+                "filename": self._filename,
+                "camera_ok": cam_ok, "camera_detail": cam_detail}
 
     def run_unit(self, unit_serial: str, est_minutes: float) -> Iterator[dict]:
         assert self._filename, "prepare() must run first"
