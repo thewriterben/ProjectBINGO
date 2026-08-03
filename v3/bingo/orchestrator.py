@@ -14,7 +14,7 @@ import uuid
 from .dfm import analyze, DfmReport
 from .ledger import Ledger
 from .match import score_nodes, allocate
-from .models import Asset, Job, JobState, Order
+from .models import Asset, Job, JobState, Order, RoyaltyLine
 from .node.agent import NodeAgent
 from .quote import quote_job, apply_network_fee
 from .registry import AssetRegistry
@@ -38,11 +38,15 @@ class Orchestrator:
                     declared_use: str = "commercial",
                     required_tier: int = 0,
                     dfm_override: DfmReport | None = None,
-                    extra_royalty_cents_per_unit: int = 0) -> tuple[Order, DfmReport]:
+                    extra_royalty_assets: list | None = None) -> tuple[Order, DfmReport]:
         """dfm_override: for assets that aren't raw STL (e.g. pre-sliced,
         already-proven gcode), the caller supplies time/mass estimates
-        instead of geometric analysis."""
+        instead of geometric analysis.
+        extra_royalty_assets: additional Assets (e.g. a process package, a
+        derivative parent) whose per-unit royalty rides on this order — each
+        settles to its OWN effective split, not the design's."""
         asset = self.registry.get(asset_id)
+        extra_royalty_assets = extra_royalty_assets or []
 
         if dfm_override is not None:
             dfm = dfm_override
@@ -62,8 +66,13 @@ class Orchestrator:
 
         quotes = [quote_job(node, asset, dfm, q, material, buyer_lat, buyer_lon,
                             declared_use) for node, q in allocation]
-        for jq in quotes:   # e.g. process-package royalty riding on the order
-            jq.royalty_cents += extra_royalty_cents_per_unit * jq.qty
+        # design royalty (per quote) + one extra line per extra asset, each at
+        # its own per-unit rate. jq.royalty_cents carries the TOTAL for the
+        # fee/subtotal math; the per-asset breakdown lives in royalty_lines.
+        design_royalty = {id(jq): jq.royalty_cents for jq in quotes}
+        for jq in quotes:
+            jq.royalty_cents = design_royalty[id(jq)] + sum(
+                a.license.per_unit_cents * jq.qty for a in extra_royalty_assets)
         total = apply_network_fee(quotes)
 
         order = Order(order_id=f"ord-{uuid.uuid4().hex[:8]}", buyer=buyer,
@@ -71,6 +80,12 @@ class Orchestrator:
                       buyer_lat=buyer_lat, buyer_lon=buyer_lon,
                       declared_use=declared_use, total_cents=total)
         for jq in quotes:
+            lines = [RoyaltyLine(asset.asset_id, design_royalty[id(jq)],
+                                 asset.effective_split.payees)]
+            for a in extra_royalty_assets:
+                c = a.license.per_unit_cents * jq.qty
+                if c > 0:
+                    lines.append(RoyaltyLine(a.asset_id, c, a.effective_split.payees))
             job = Job(job_id=f"job-{uuid.uuid4().hex[:8]}", order_id=order.order_id,
                       asset_id=asset_id, node_id=jq.node.node_id, qty=jq.qty,
                       material=material,
@@ -78,8 +93,9 @@ class Orchestrator:
                       material_cents=jq.material_cents,
                       energy_cents=jq.energy_cents,
                       logistics_cents=jq.logistics_cents,
-                      royalty_cents=jq.royalty_cents,
+                      royalty_lines=lines,
                       fee_cents=jq.fee_cents)
+            assert job.royalty_cents == jq.royalty_cents, "royalty lines must sum to quoted royalty"
             order.jobs.append(job)
 
         self.orders[order.order_id] = order
@@ -116,7 +132,7 @@ class Orchestrator:
             agent.confirm_delivery(job, confirmer=confirmer)
 
             assert NodeAgent.verify_chain(job), "PoF chain verification failed"
-            entry = self.ledger.settle_job(order, job, asset.effective_split.payees)
+            entry = self.ledger.settle_job(order, job)
             job.state = JobState.SETTLED
             settled.append(job)
             narrate(f"    ✓ settled atomically — journal entry #{entry.entry_id}, "

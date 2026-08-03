@@ -158,6 +158,16 @@ class EvidenceEvent:
 
 
 @dataclass
+class RoyaltyLine:
+    """One asset's royalty on a job, routed to that asset's own effective
+    split at settlement. A job with a design + a process package + a
+    derivative carries one line each — each settles to its own payees."""
+    asset_id: str
+    cents: int
+    payees: list  # list[SplitPayee] — the asset's frozen effective_split
+
+
+@dataclass
 class Job:
     job_id: str
     order_id: str
@@ -172,8 +182,13 @@ class Job:
     material_cents: int = 0
     energy_cents: int = 0
     logistics_cents: int = 0
-    royalty_cents: int = 0
+    royalty_lines: list[RoyaltyLine] = field(default_factory=list)
     fee_cents: int = 0
+
+    @property
+    def royalty_cents(self) -> int:
+        """Total royalty across all lines (convenience for totals/quotes)."""
+        return sum(l.cents for l in self.royalty_lines)
 
     @property
     def job_total_cents(self) -> int:

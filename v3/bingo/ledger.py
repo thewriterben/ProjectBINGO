@@ -67,10 +67,12 @@ class Ledger:
 
     # -- atomic per-job settlement ---------------------------------------------
 
-    def settle_job(self, order: Order, job: Job, effective_split_payees) -> JournalEntry:
+    def settle_job(self, order: Order, job: Job) -> JournalEntry:
         """One atomic release on DELIVERY_CONFIRMED. Invariants asserted:
-        legs sum exactly to the escrow decrement; royalty flows only through
-        the asset's frozen effective split."""
+        legs sum exactly to the escrow decrement; each royalty line flows only
+        through its own asset's frozen effective split — a design, a process
+        package, and a derivative each reach their own payees in this single
+        atomic transaction."""
         total = job.job_total_cents
         if self.escrow.get(order.order_id, 0) < total:
             raise SettlementError(
@@ -84,18 +86,22 @@ class Ledger:
             Leg(CARRIER_ACCOUNT, job.logistics_cents, "logistics"),
         ]
 
-        # Royalty legs: ONLY code path that pays fabrication also pays the split.
-        distributed = 0
-        royalty_legs: list[Leg] = []
-        for p in effective_split_payees:
-            amt = (job.royalty_cents * p.bps) // 10_000
-            if amt > 0:
-                royalty_legs.append(Leg(p.account, amt, f"royalty {p.bps}bps"))
-                distributed += amt
-        residue = job.royalty_cents - distributed          # integer-floor residue
-        if royalty_legs and residue > 0:
-            royalty_legs[0].amount_cents += residue        # deterministic: first payee
-        legs.extend(royalty_legs)
+        # Royalty legs, PER ASSET: each line routes through its own split.
+        # This is the ONLY code path that pays fabrication, and it cannot pay
+        # fabrication without paying every registered royalty line.
+        for line in job.royalty_lines:
+            tag = line.asset_id[:8]
+            distributed = 0
+            line_legs: list[Leg] = []
+            for p in line.payees:
+                amt = (line.cents * p.bps) // 10_000
+                if amt > 0:
+                    line_legs.append(Leg(p.account, amt, f"royalty {p.bps}bps [{tag}]"))
+                    distributed += amt
+            residue = line.cents - distributed             # integer-floor residue
+            if line_legs and residue > 0:
+                line_legs[0].amount_cents += residue       # deterministic: first payee
+            legs.extend(line_legs)
 
         legs.append(Leg(NETWORK_ACCOUNT, job.fee_cents, "network fee (3%)"))
 
@@ -109,7 +115,8 @@ class Ledger:
         entry_legs = [Leg(l.account, l.amount_cents, l.memo) for l in legs]
         self._append("JOB_SETTLEMENT", order.order_id, job.job_id, entry_legs,
                      provenance={"asset_id": job.asset_id, "node_id": job.node_id,
-                                 "qty": job.qty, "pof_chain_head": job.chain_head()})
+                                 "qty": job.qty, "pof_chain_head": job.chain_head(),
+                                 "royalty_assets": [l.asset_id for l in job.royalty_lines]})
         return self.journal[-1]
 
     # -- reporting --------------------------------------------------------------

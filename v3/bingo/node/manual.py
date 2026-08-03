@@ -137,15 +137,14 @@ def main(argv=None):
                     volume_mm3=0.0, est_grams_per_unit=args.grams,
                     est_hours_per_unit=(args.est_minutes / max(args.qty, 1)) / 60.0)
 
-    pkg_royalty = package.license.per_unit_cents if package else 0
     order, dfm = orch.place_order(buyer=args.buyer, asset_id=design.asset_id,
                                   qty=args.qty, material=args.material,
                                   buyer_lat=0.0, buyer_lon=0.0,
                                   required_tier=1, dfm_override=dfm,
-                                  extra_royalty_cents_per_unit=pkg_royalty)
+                                  extra_royalty_assets=[package] if package else None)
     if package:
-        print(f"✓ package royalty attached: {pkg_royalty}¢/unit → "
-              f"'{package.title}'")
+        print(f"✓ package royalty attached: {package.license.per_unit_cents}¢/unit → "
+              f"'{package.title}' (settles to its own split)")
 
     print(f"✓ order {order.order_id}: {args.qty} × '{design.title}' — "
           f"escrow ${order.total_cents / 100:.2f}")
@@ -157,11 +156,9 @@ def main(argv=None):
               "and release settlement… ")
         return f"operator:{args.operator}"
 
-    # NOTE v0 limitation: with a package, both royalty lines settle through the
-    # DESIGN's split. Correct per-asset routing of multiple royalty lines is a
-    # v0.2 settlement item — flagged, not hidden. For the DGD token run, set
-    # the design split to include the package payees at agreed weights, or
-    # register the package as a derivation parent of the design.
+    # Each royalty line settles to its OWN asset's split: the design royalty
+    # to the design's payees, the package royalty to the package's payees, in
+    # one atomic transaction (multi-asset routing landed v0.2).
     try:
         settled = orch.execute_order(order, dfm, narrate=print,
                                      gcode=registry.get_content(package or design),

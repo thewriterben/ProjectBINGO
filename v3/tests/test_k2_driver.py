@@ -10,7 +10,8 @@ from __future__ import annotations
 import sys
 
 from bingo.ledger import Ledger
-from bingo.models import Job, License, LicenseTemplate, Machine, NodeInfo, Split, SplitPayee
+from bingo.models import (Job, License, LicenseTemplate, Machine, NodeInfo,
+                          RoyaltyLine, Split, SplitPayee)
 from bingo.node.agent import NodeAgent
 from bingo.node.k2 import K2Driver
 import bingo.node.k2 as k2mod
@@ -41,7 +42,9 @@ def main() -> int:
         job = Job(job_id="job-test1", order_id="ord-test1", asset_id=asset.asset_id,
                   node_id="n-test", qty=2, material="PLA",
                   fabrication_cents=300, material_cents=60, energy_cents=5,
-                  logistics_cents=550, royalty_cents=80, fee_cents=30)
+                  logistics_cents=550, fee_cents=30,
+                  royalty_lines=[RoyaltyLine(asset.asset_id, 80,
+                                             asset.effective_split.payees)])
 
         assert agent.offer(job, {"payment_cents": job.job_total_cents})
         agent.fabricate(job, b"; fake sliced gcode\nG28\n", est_minutes_per_unit=0.1)
@@ -59,7 +62,7 @@ def main() -> int:
             order_id, total_cents = "ord-test1", job.job_total_cents
             buyer = "acct:test-buyer"
         ledger.fund_escrow(FakeOrder)
-        ledger.settle_job(FakeOrder, job, asset.effective_split.payees)
+        ledger.settle_job(FakeOrder, job)
         assert ledger.escrow["ord-test1"] == 0
         assert ledger.balance("acct:ben") == 80, ledger.balances
 
