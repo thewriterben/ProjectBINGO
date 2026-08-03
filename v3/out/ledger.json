@@ -1,0 +1,63 @@
+{
+  "balances": {
+    "acct:node:n-k2plus": 148,
+    "acct:carrier-pool": 550,
+    "acct:ben": 40,
+    "acct:network": 22
+  },
+  "escrow": {
+    "ord-3373e1a1": 0
+  },
+  "journal": [
+    {
+      "entry_id": 1,
+      "ts": "2026-08-03T00:53:49Z",
+      "kind": "ESCROW_FUND",
+      "order_id": "ord-3373e1a1",
+      "job_id": null,
+      "legs": [
+        {
+          "account": "escrow:ord-3373e1a1",
+          "cents": 760,
+          "memo": "buyer acct:first-buyer funds order"
+        }
+      ],
+      "provenance": {}
+    },
+    {
+      "entry_id": 2,
+      "ts": "2026-08-03T01:19:40Z",
+      "kind": "JOB_SETTLEMENT",
+      "order_id": "ord-3373e1a1",
+      "job_id": "job-65b98779",
+      "legs": [
+        {
+          "account": "acct:node:n-k2plus",
+          "cents": 148,
+          "memo": "fabrication + material + energy"
+        },
+        {
+          "account": "acct:carrier-pool",
+          "cents": 550,
+          "memo": "logistics"
+        },
+        {
+          "account": "acct:ben",
+          "cents": 40,
+          "memo": "royalty 10000bps"
+        },
+        {
+          "account": "acct:network",
+          "cents": 22,
+          "memo": "network fee (3%)"
+        }
+      ],
+      "provenance": {
+        "asset_id": "470b96087493a307be3c4bc36095979aefdc2a67602e4f9ff9c6925154602139",
+        "node_id": "n-k2plus",
+        "qty": 1,
+        "pof_chain_head": "68d29dbe38138f01d2d4d6d9970b95ea201c1098483510ebab06cc79a98ebfea"
+      }
+    }
+  ]
+}
