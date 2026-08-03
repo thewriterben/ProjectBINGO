@@ -16,6 +16,9 @@ API:
   POST /api/orders                {asset_id, qty, material?, grade?, buyer?}
                                   → places, fabricates, settles; returns the receipt
   GET  /api/orders/<id>           order status + per-job settlement
+  GET  /api/creators/<account>    what a creator earned: total, units, per-design
+  GET  /api/creators/<a>/statement  plain-text creator statement (the receipt)
+  GET  /creator/<account>         a creator's earnings page (the payoff view)
   GET  /api/verify/<job_id>       independently verify that job's persisted PoF
 """
 
@@ -30,6 +33,7 @@ from urllib.parse import urlparse
 
 from . import evidence
 from .acceptance import Grade, GRADE_NAME
+from .earnings import creator_earnings, statement_text
 from .ledger import Ledger, NETWORK_ACCOUNT, CARRIER_ACCOUNT
 from .models import (Derivation, License, LicenseTemplate, Machine, NodeInfo,
                     Split, SplitPayee)
@@ -145,6 +149,18 @@ def _place_order(body: dict) -> dict:
     }
 
 
+def _creator(account: str) -> dict:
+    if not account.startswith("acct:"):
+        account = "acct:" + account
+    return creator_earnings(LEDGER, REG, account).to_dict()
+
+
+def _creator_statement(account: str) -> str:
+    if not account.startswith("acct:"):
+        account = "acct:" + account
+    return statement_text(creator_earnings(LEDGER, REG, account))
+
+
 def _verify(job_id: str) -> dict:
     path = os.path.join(OUT_DIR, "evidence", f"{job_id}.json")
     if not os.path.exists(path):
@@ -178,6 +194,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(_nodes())
         if path == "/api/dashboard":
             return self._send(_dashboard())
+        if path.startswith("/api/creators/"):
+            rest = path[len("/api/creators/"):]
+            if rest.endswith("/statement"):
+                return self._send(_creator_statement(rest[:-len("/statement")]),
+                                  ctype="text/plain; charset=utf-8")
+            return self._send(_creator(rest))
+        if path.startswith("/creator/"):
+            return self._send(CREATOR_PAGE, ctype="text/html")
         if path.startswith("/api/verify/"):
             return self._send(_verify(path.rsplit("/", 1)[-1]))
         if path.startswith("/api/orders/"):
@@ -244,7 +268,7 @@ async function j(u,o){return (await fetch(u,o)).json()}
 async function load(){
  const a=await j('/api/assets');
  $('#assets').innerHTML='<tr><th>title</th><th>license</th><th>split</th></tr>'+a.map(x=>
-  `<tr><td>${x.title}${x.derived?' <span style=color:#8b949e>· remix</span>':''}</td><td>${x.per_unit_cents}¢/unit</td><td>${x.split.map(s=>s.account.replace('acct:','')+' '+(s.bps/100)+'%').join(' · ')}</td></tr>`).join('');
+  `<tr><td>${x.title}${x.derived?' <span style=color:#8b949e>· remix</span>':''}</td><td>${x.per_unit_cents}¢/unit</td><td>${x.split.map(s=>`<a href="/creator/${encodeURIComponent(s.account)}">${s.account.replace('acct:','')}</a> `+(s.bps/100)+'%').join(' · ')}</td></tr>`).join('');
  const sel=$('#asset');sel.innerHTML=a.map(x=>`<option value=${x.asset_id}>${x.title}</option>`).join('');
  const n=await j('/api/nodes');
  $('#nodes').innerHTML='<tr><th>node</th><th>tier</th><th>materials</th><th>rep(F)</th><th>key</th></tr>'+n.map(x=>
@@ -263,6 +287,43 @@ async function order(){
  $('#out').textContent=JSON.stringify(r,null,2);load();
 }
 load();
+</script></body></html>"""
+
+
+CREATOR_PAGE = """<!DOCTYPE html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>BINGO — creator earnings</title><style>
+:root{--bg:#0e1116;--card:#161b22;--ink:#e6edf3;--dim:#8b949e;--acc:#4ade80;--line:#242b36}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+font:15px/1.55 system-ui,sans-serif;padding:1.5rem 1rem 4rem}main{max-width:760px;margin:0 auto}
+a{color:#79c0ff}h1{font-size:1.1rem;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
+.hero{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.8rem;margin:1rem 0;text-align:center}
+.hero .who{color:var(--dim);font-size:.9rem}.hero .big{font-size:2.6rem;font-weight:700;color:var(--acc);margin:.2rem 0}
+.hero .sub{color:var(--dim)}section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1rem 1.2rem;margin-bottom:1.2rem}
+h2{font-size:.9rem;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin:.2rem 0 .7rem}
+table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{padding:.45rem .5rem;border-top:1px solid var(--line);text-align:left}
+th{color:var(--dim);border-top:none}.amt{text-align:right;color:var(--acc);font-variant-numeric:tabular-nums}
+.foot{color:var(--dim);font-size:.85rem;text-align:center;margin-top:1rem}</style></head><body><main>
+<h1>Project BINGO · creator earnings</h1>
+<div class=hero><div class=who id=who>—</div><div class=big id=total>$0.00</div>
+<div class=sub id=sub></div></div>
+<section><h2>By design</h2><table id=designs></table></section>
+<p class=foot>Paid automatically, at the point of fabrication, on every unit —
+no invoice, no platform's mercy. This is your money.<br>
+<a href="/">← the whole network</a> · <a id=stmt href="#">plain-text statement</a></p>
+</main><script>
+const $=s=>document.querySelector(s);
+const acct=decodeURIComponent(location.pathname.replace(/^\\/creator\\//,''));
+$('#stmt').href='/api/creators/'+encodeURIComponent(acct)+'/statement';
+(async()=>{
+ const d=await (await fetch('/api/creators/'+encodeURIComponent(acct))).json();
+ $('#who').textContent=d.account;
+ $('#total').textContent='$'+(d.total_cents/100).toFixed(2);
+ $('#sub').textContent=d.units+' units · '+d.designs.length+' design(s) · '+d.machines+' machine(s) · '+d.orders+' order(s)';
+ $('#designs').innerHTML='<tr><th>design</th><th>units</th><th class=amt>earned</th></tr>'+
+  (d.designs.length?d.designs.map(x=>`<tr><td>${x.title}</td><td>${x.units}</td><td class=amt>$${(x.cents/100).toFixed(2)}</td></tr>`).join('')
+   :'<tr><td colspan=3 style=color:#8b949e>no royalties yet</td></tr>');
+})();
 </script></body></html>"""
 
 
