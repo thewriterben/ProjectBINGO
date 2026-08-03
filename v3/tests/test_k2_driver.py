@@ -53,7 +53,13 @@ def main() -> int:
         agent.ship(job, "local", "handoff")
         agent.confirm_delivery(job, "operator:test")
 
-        assert NodeAgent.verify_chain(job), "PoF chain must verify"
+        assert NodeAgent.verify_chain(job, agent.public_key_hex), \
+            "PoF chain must verify (hash + ed25519 signatures)"
+        # a wrong key must reject the whole chain
+        from bingo import crypto
+        _, other_pk = crypto.keypair()
+        assert not NodeAgent.verify_chain(job, other_pk.hex()), \
+            "chain must reject a different node's key"
         types = [e.type for e in job.evidence]
         for required in ("JOB_ACCEPTED", "INPUT_HASH", "TELEMETRY", "FRAME",
                          "UNIT_COMPLETE", "SHIPMENT", "DELIVERY_CONFIRMED"):

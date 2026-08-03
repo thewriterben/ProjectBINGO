@@ -1,34 +1,35 @@
 """L2 — Node agent.
 
 Runs at a fabricator's site: accepts jobs, drives machines, and emits the
-hash-chained, signed PoF evidence log per specs/NODE-AGENT.md.
+hash-chained, ed25519-signed PoF evidence log per specs/NODE-AGENT.md.
 
-Signing: HMAC-SHA256 with a node secret as a stand-in for ed25519 — same
-interface (`sign(payload) -> sig`), swapped in production. The chain
-structure (each event commits to prev_hash) is the load-bearing part.
+Signing: Ed25519. Each node holds a 32-byte seed (private key) and publishes
+its public key; every evidence event is signed over its canonical body. The
+chain is hash-linked (prev_hash) AND signed, so ANYONE with the node's public
+key can verify the whole log independently — the property HMAC could not give.
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import os
-
+from .. import crypto
 from ..models import (EvidenceEvent, Job, JobState, NodeInfo,
                       now_iso, sha256_hex, canonical_json)
 from .drivers import MockDriver
 
 
 class NodeAgent:
-    def __init__(self, info: NodeInfo, driver: MockDriver | None = None):
+    def __init__(self, info: NodeInfo, driver: MockDriver | None = None,
+                 seed: bytes | None = None):
         self.info = info
         self.driver = driver or MockDriver(info.machines[0].machine_id)
-        self._secret = os.urandom(32)          # ed25519 keypair in production
+        self._seed, self._pk = crypto.keypair(seed)   # private seed, public key
+        self.public_key_hex = self._pk.hex()
+        info.public_key_hex = self.public_key_hex     # publish on the node record
 
     # -- evidence chain -------------------------------------------------------
 
     def _sign(self, payload: bytes) -> str:
-        return hmac.new(self._secret, payload, hashlib.sha256).hexdigest()
+        return crypto.sign(payload, self._seed, self._pk).hex()
 
     def _emit(self, job: Job, type_: str, data: dict):
         ev = EvidenceEvent(seq=len(job.evidence) + 1, ts=now_iso(),
@@ -39,9 +40,11 @@ class NodeAgent:
         job.evidence.append(ev)
 
     @staticmethod
-    def verify_chain(job: Job) -> bool:
-        """Anyone can verify ordering/integrity from hashes alone
-        (signature verification additionally needs the node's public key)."""
+    def verify_chain(job: Job, public_key_hex: str | None = None) -> bool:
+        """Verify hash-chain integrity always. If a public key is supplied,
+        also verify every event's ed25519 signature — full independent
+        verification of who produced the evidence, not just that it's ordered."""
+        pk = bytes.fromhex(public_key_hex) if public_key_hex else None
         prev = "0" * 64
         for ev in job.evidence:
             if ev.prev_hash != prev:
@@ -49,6 +52,12 @@ class NodeAgent:
             body = canonical_json(ev.body())
             if ev.hash != sha256_hex(body + ev.sig.encode()):
                 return False
+            if pk is not None:
+                try:
+                    if not crypto.verify(body, bytes.fromhex(ev.sig), pk):
+                        return False
+                except ValueError:
+                    return False
             prev = ev.hash
         return True
 
@@ -62,7 +71,9 @@ class NodeAgent:
             return False
         job.state = JobState.ACCEPTED
         self._emit(job, "JOB_ACCEPTED",
-                   {"terms_sha256": sha256_hex(canonical_json(terms))})
+                   {"terms_sha256": sha256_hex(canonical_json(terms)),
+                    "node_id": self.info.node_id,
+                    "node_pubkey": self.public_key_hex})  # chain is self-describing
         return True
 
     def fabricate(self, job: Job, gcode: bytes, est_minutes_per_unit: float):

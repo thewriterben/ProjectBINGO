@@ -131,7 +131,8 @@ class Orchestrator:
                          else "carrier:usps-webhook")
             agent.confirm_delivery(job, confirmer=confirmer)
 
-            assert NodeAgent.verify_chain(job), "PoF chain verification failed"
+            assert NodeAgent.verify_chain(job, agent.public_key_hex), \
+                "PoF chain signature verification failed"
             entry = self.ledger.settle_job(order, job)
             job.state = JobState.SETTLED
             settled.append(job)

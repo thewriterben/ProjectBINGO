@@ -126,6 +126,8 @@ class NodeInfo:
     failed_jobs: int = 0
     materials_on_hand: list[str] | None = None  # declared inventory; None = undeclared
                                                 # (matching routes around dry nodes when declared)
+    public_key_hex: str = ""          # ed25519 public key; set by the node agent,
+                                      # published so anyone can verify this node's PoF
 
 
 class JobState(str, Enum):

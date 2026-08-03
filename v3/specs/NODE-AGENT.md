@@ -35,7 +35,7 @@ A **job** is a batch of units of one asset on one node. Node API (HTTP+JSON in p
 
 ## Proof-of-Fabrication (PoF)
 
-PoF is a **hash-chained, node-signed event log** per job. Each event: `{seq, ts, type, data, prev_hash, sig}` where `prev_hash` chains to the prior event, so the log cannot be reordered or trimmed after the fact, and each event is signed at capture time (commitments are cheap; storage of the underlying frames/logs can be lazy).
+PoF is a **hash-chained, Ed25519-signed event log** per job. Each event: `{seq, ts, type, data, prev_hash, sig}` where `prev_hash` chains to the prior event, so the log cannot be reordered or trimmed after the fact, and each event is signed at capture time with the node's Ed25519 key (commitments are cheap; storage of the underlying frames/logs can be lazy). The node's public key is published on its node record and embedded in the `JOB_ACCEPTED` event, so the chain is **self-describing**: anyone holding the public key can verify the entire log independently — hash integrity *and* authorship — without any secret. (v0 ships a stdlib-only pure-Python Ed25519, cross-checked byte-for-byte against RFC 8032 / the `cryptography` library.)
 
 v0 event types:
 
