@@ -19,6 +19,8 @@ API:
   GET  /api/creators/<account>    what a creator earned: total, units, per-design
   GET  /api/creators/<a>/statement  plain-text creator statement (the receipt)
   GET  /creator/<account>         a creator's earnings page (the payoff view)
+  GET  /api/passport/<asset_id>   an RWA good's provenance passport + verification
+  GET  /passport/<asset_id>       that good's printable provenance certificate
   GET  /api/verify/<job_id>       independently verify that job's persisted PoF
 """
 
@@ -41,6 +43,9 @@ from .node.agent import NodeAgent
 from .orchestrator import Orchestrator, OrderRejected
 from .registry import AssetRegistry
 from .demo.make_design import bracket_stl, clip_stl
+from provenance.register import register_rwa, passport_of
+from provenance.passport import verify_passport
+from provenance.demo import build as build_wagyu_passport, certificate_html
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "out")
 _lock = threading.Lock()
@@ -75,12 +80,38 @@ def seed_network():
                  lat=39.10, lon=-94.58, tier=2, rate_cents_per_hour=650,
                  machines=[fdm("m-x1e", "Bambu X1E", 0.14)], reputation=0.85),
     ]
+    # A physical real-world good, registered as a first-class asset: its
+    # content IS its signed provenance passport (content-addressed), its split
+    # is the passport's value routing. A cow alongside the brackets.
+    register_rwa(reg, build_wagyu_passport(), creator="acct:op:dgd-wagyu")
+
     agents = [NodeAgent(n) for n in nodes]
     orch = Orchestrator(reg, ledger, agents, evidence_dir=os.path.join(OUT_DIR, "evidence"))
     return reg, ledger, orch, agents
 
 
 REG, LEDGER, ORCH, AGENTS = seed_network()
+
+
+def _provenance_summary(asset) -> dict | None:
+    """For an RWA asset, a compact, verified summary drawn from its passport."""
+    if asset.kind != "rwa":
+        return None
+    pp = passport_of(REG, asset)
+    ok, _ = verify_passport(pp)
+    ev = {e["type"]: e["data"] for e in pp["events"]}
+    lineage, harvest = ev.get("LINEAGE", {}), ev.get("HARVEST", {})
+    return {
+        "verified": ok,
+        "grade": harvest.get("grade"),
+        "origin": lineage.get("birth_ranch"),
+        "tajima_pct": lineage.get("tajima_pct"),
+        "links": len(pp["events"]),
+        "signers": len(pp["signers"]),
+        "chain_head": pp["chain_head"][:16],
+        "price_cents": asset.license.flat_fee_cents,
+        "certificate": f"/passport/{asset.asset_id}",
+    }
 
 
 def _assets():
@@ -90,8 +121,32 @@ def _assets():
                     "per_unit_cents": a.license.per_unit_cents,
                     "split": [{"account": p.account, "bps": p.bps}
                               for p in a.effective_split.payees],
-                    "derived": bool(a.derives_from)})
+                    "derived": bool(a.derives_from),
+                    "provenance": _provenance_summary(a)})
     return out
+
+
+def _passport(asset_id: str) -> dict:
+    try:
+        asset = REG.get(asset_id)
+    except KeyError:
+        return {"error": "not found"}
+    if asset.kind != "rwa":
+        return {"error": "asset has no provenance passport"}
+    pp = passport_of(REG, asset)
+    ok, notes = verify_passport(pp)
+    return {"asset_id": asset_id, "verify": {"ok": ok, "notes": notes},
+            "passport": pp}
+
+
+def _certificate(asset_id: str) -> str | None:
+    try:
+        asset = REG.get(asset_id)
+    except KeyError:
+        return None
+    if asset.kind != "rwa":
+        return None
+    return certificate_html(passport_of(REG, asset))
 
 
 def _nodes():
@@ -194,6 +249,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(_nodes())
         if path == "/api/dashboard":
             return self._send(_dashboard())
+        if path.startswith("/api/passport/"):
+            return self._send(_passport(path.rsplit("/", 1)[-1]))
+        if path.startswith("/passport/"):
+            cert = _certificate(path.rsplit("/", 1)[-1])
+            return self._send(cert, ctype="text/html") if cert else \
+                self._send({"error": "no passport for that asset"}, 404)
         if path.startswith("/api/creators/"):
             rest = path[len("/api/creators/"):]
             if rest.endswith("/statement"):
@@ -267,9 +328,12 @@ const $=s=>document.querySelector(s);
 async function j(u,o){return (await fetch(u,o)).json()}
 async function load(){
  const a=await j('/api/assets');
- $('#assets').innerHTML='<tr><th>title</th><th>license</th><th>split</th></tr>'+a.map(x=>
-  `<tr><td>${x.title}${x.derived?' <span style=color:#8b949e>· remix</span>':''}</td><td>${x.per_unit_cents}¢/unit</td><td>${x.split.map(s=>`<a href="/creator/${encodeURIComponent(s.account)}">${s.account.replace('acct:','')}</a> `+(s.bps/100)+'%').join(' · ')}</td></tr>`).join('');
- const sel=$('#asset');sel.innerHTML=a.map(x=>`<option value=${x.asset_id}>${x.title}</option>`).join('');
+ $('#assets').innerHTML='<tr><th>title</th><th>kind / license</th><th>split</th></tr>'+a.map(x=>{
+  const pv=x.provenance;
+  const badge=pv?` <a href="${pv.certificate}" title="${pv.links} signed links · chain ${pv.chain_head}…" style="color:${pv.verified?'#4ade80':'#f85149'};text-decoration:none">✓ verified provenance</a>`:(x.derived?' <span style=color:#8b949e>· remix</span>':'');
+  const kind=pv?`RWA · ${pv.grade} · ${pv.tajima_pct}% Tajima · $${(pv.price_cents/100).toFixed(2)}`:`${x.per_unit_cents}¢/unit`;
+  return `<tr><td>${x.title}${badge}</td><td>${kind}</td><td>${x.split.map(s=>`<a href="/creator/${encodeURIComponent(s.account)}">${s.account.replace('acct:','')}</a> `+(s.bps/100)+'%').join(' · ')}</td></tr>`}).join('');
+ const sel=$('#asset');sel.innerHTML=a.filter(x=>x.kind!=='rwa').map(x=>`<option value=${x.asset_id}>${x.title}</option>`).join('');
  const n=await j('/api/nodes');
  $('#nodes').innerHTML='<tr><th>node</th><th>tier</th><th>materials</th><th>rep(F)</th><th>key</th></tr>'+n.map(x=>
   `<tr><td>${x.name}</td><td>${x.tier}</td><td>${x.materials.join(', ')}</td><td>${x.reputation_F}</td><td><code>${x.public_key}</code></td></tr>`).join('');
