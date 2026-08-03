@@ -21,6 +21,8 @@ API:
   GET  /creator/<account>         a creator's earnings page (the payoff view)
   GET  /api/passport/<asset_id>   an RWA good's provenance passport + verification
   GET  /passport/<asset_id>       that good's printable provenance certificate
+  GET  /api/tokens                tokenized claims on RWA goods (backed by provenance)
+  GET  /api/token/<id>            one token's ownership ledger + replay verification
   GET  /api/verify/<job_id>       independently verify that job's persisted PoF
 """
 
@@ -44,8 +46,9 @@ from .orchestrator import Orchestrator, OrderRejected
 from .registry import AssetRegistry
 from .demo.make_design import bracket_stl, clip_stl
 from provenance.register import register_rwa, passport_of
-from provenance.passport import verify_passport
+from provenance.passport import verify_passport, Actor
 from provenance.demo import build as build_wagyu_passport, certificate_html
+from provenance.token import AssetToken, verify_token
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "out")
 _lock = threading.Lock()
@@ -93,6 +96,27 @@ def seed_network():
 REG, LEDGER, ORCH, AGENTS = seed_network()
 
 
+def seed_tokens() -> dict:
+    """Issue a tokenized claim on the RWA good — 100 shares, pinned to its
+    verified provenance — and do one primary transfer, so the network shows a
+    real, verifiable ownership ledger sitting on top of a proven asset."""
+    rwa = next((a for a in REG.all() if a.kind == "rwa"), None)
+    if not rwa:
+        return {}
+    pp = passport_of(REG, rwa)
+    op = Actor.create("dgd-wagyu", "DGD Wagyu Co.", "operation", "acct:op:dgd-wagyu")
+    chef = Actor.create("river-grill", "River Grill (Ketchum)", "buyer",
+                        "acct:buyer:river-grill")
+    tok = AssetToken(backing_asset_id=rwa.asset_id, passport_head=pp["chain_head"],
+                     unit=f'1/100 of lot {pp["subject"]["lot"]}', total_supply=100,
+                     issuer=op, ts="2026-07-31T18:00:00Z")
+    tok.transfer(op, chef.account, 40, ts="2026-07-31T18:05:00Z")
+    return {tok.token_id: tok.to_dict()}
+
+
+TOKENS = seed_tokens()
+
+
 def _provenance_summary(asset) -> dict | None:
     """For an RWA asset, a compact, verified summary drawn from its passport."""
     if asset.kind != "rwa":
@@ -111,6 +135,7 @@ def _provenance_summary(asset) -> dict | None:
         "chain_head": pp["chain_head"][:16],
         "price_cents": asset.license.flat_fee_cents,
         "certificate": f"/passport/{asset.asset_id}",
+        "tokenized": _token_for_asset(asset.asset_id),
     }
 
 
@@ -137,6 +162,44 @@ def _passport(asset_id: str) -> dict:
     ok, notes = verify_passport(pp)
     return {"asset_id": asset_id, "verify": {"ok": ok, "notes": notes},
             "passport": pp}
+
+
+def _verify_token(td: dict) -> tuple[bool, list]:
+    """Verify a token, pulling its backing passport from the registry so the
+    provenance pin is actually checked."""
+    try:
+        backing = passport_of(REG, REG.get(td["backing_asset_id"]))
+    except (KeyError, Exception):
+        backing = None
+    return verify_token(td, backing_passport=backing)
+
+
+def _tokens() -> list:
+    out = []
+    for tid, td in TOKENS.items():
+        ok, _ = _verify_token(td)
+        out.append({"token_id": tid, "unit": td["unit"],
+                    "backing_asset_id": td["backing_asset_id"],
+                    "total_supply": td["total_supply"],
+                    "circulating": td["circulating"], "retired": td["retired"],
+                    "holders": len(td["balances"]), "verified": ok})
+    return out
+
+
+def _token(token_id: str) -> dict:
+    td = TOKENS.get(token_id)
+    if not td:
+        return {"error": "not found"}
+    ok, notes = _verify_token(td)
+    return {"token_id": token_id, "verify": {"ok": ok, "notes": notes}, "token": td}
+
+
+def _token_for_asset(asset_id: str) -> dict | None:
+    for tid, td in TOKENS.items():
+        if td["backing_asset_id"] == asset_id:
+            return {"token_id": tid, "circulating": td["circulating"],
+                    "total_supply": td["total_supply"], "unit": td["unit"]}
+    return None
 
 
 def _certificate(asset_id: str) -> str | None:
@@ -249,6 +312,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(_nodes())
         if path == "/api/dashboard":
             return self._send(_dashboard())
+        if path == "/api/tokens":
+            return self._send(_tokens())
+        if path.startswith("/api/token/"):
+            return self._send(_token(path.rsplit("/", 1)[-1]))
         if path.startswith("/api/passport/"):
             return self._send(_passport(path.rsplit("/", 1)[-1]))
         if path.startswith("/passport/"):
@@ -318,7 +385,8 @@ a{color:#79c0ff}</style></head><body><main>
 <button onclick=order()>Order</button></div>
 <div id=out></div></section>
 
-<section><h2>Designs (L1)</h2><table id=assets></table></section>
+<section><h2>Assets (L1) — designs & provenance-verified real-world goods</h2><table id=assets></table></section>
+<section><h2>Tokenized claims — ownership backed by verified provenance</h2><table id=tokens></table></section>
 <section><h2>Nodes (L2)</h2><table id=nodes></table></section>
 <section><h2>Recent settlements (L4)</h2><table id=recent></table></section>
 <p style="color:var(--dim);font-size:.8rem">Agent-first API: <code>GET /api/assets</code>,
@@ -330,10 +398,14 @@ async function load(){
  const a=await j('/api/assets');
  $('#assets').innerHTML='<tr><th>title</th><th>kind / license</th><th>split</th></tr>'+a.map(x=>{
   const pv=x.provenance;
-  const badge=pv?` <a href="${pv.certificate}" title="${pv.links} signed links · chain ${pv.chain_head}…" style="color:${pv.verified?'#4ade80':'#f85149'};text-decoration:none">✓ verified provenance</a>`:(x.derived?' <span style=color:#8b949e>· remix</span>':'');
+  let badge=pv?` <a href="${pv.certificate}" title="${pv.links} signed links · chain ${pv.chain_head}…" style="color:${pv.verified?'#4ade80':'#f85149'};text-decoration:none">✓ verified provenance</a>`:(x.derived?' <span style=color:#8b949e>· remix</span>':'');
+  if(pv&&pv.tokenized)badge+=` <span style=color:#d2a8ff title="${pv.tokenized.circulating}/${pv.tokenized.total_supply} shares circulating">◆ tokenized</span>`;
   const kind=pv?`RWA · ${pv.grade} · ${pv.tajima_pct}% Tajima · $${(pv.price_cents/100).toFixed(2)}`:`${x.per_unit_cents}¢/unit`;
   return `<tr><td>${x.title}${badge}</td><td>${kind}</td><td>${x.split.map(s=>`<a href="/creator/${encodeURIComponent(s.account)}">${s.account.replace('acct:','')}</a> `+(s.bps/100)+'%').join(' · ')}</td></tr>`}).join('');
  const sel=$('#asset');sel.innerHTML=a.filter(x=>x.kind!=='rwa').map(x=>`<option value=${x.asset_id}>${x.title}</option>`).join('');
+ const tk=await j('/api/tokens');
+ $('#tokens').innerHTML=tk.length?('<tr><th>token</th><th>unit</th><th>circulating</th><th>holders</th><th>verified</th></tr>'+tk.map(t=>
+  `<tr><td><code>${t.token_id.slice(0,12)}…</code></td><td>${t.unit}</td><td>${t.circulating}/${t.total_supply}${t.retired?` <span style=color:#8b949e>(${t.retired} redeemed)</span>`:''}</td><td>${t.holders}</td><td style=color:${t.verified?'#4ade80':'#f85149'}>${t.verified?'✓ replayed':'✗'}</td></tr>`).join('')):'<tr><td>no tokens</td></tr>';
  const n=await j('/api/nodes');
  $('#nodes').innerHTML='<tr><th>node</th><th>tier</th><th>materials</th><th>rep(F)</th><th>key</th></tr>'+n.map(x=>
   `<tr><td>${x.name}</td><td>${x.tier}</td><td>${x.materials.join(', ')}</td><td>${x.reputation_F}</td><td><code>${x.public_key}</code></td></tr>`).join('');

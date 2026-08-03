@@ -27,6 +27,7 @@ SUITE = [
     ("creator earnings", "tests.test_earnings", V3),
     ("provenance passport (RWA)", "tests.test_passport", V3),
     ("rwa as first-class asset", "tests.test_rwa_asset", V3),
+    ("rwa tokenization (ownership ledger)", "tests.test_token", V3),
     ("k2 driver (fake moonraker)", "tests.test_k2_driver", V3),
     ("sentinel classifier", "sentinel.test_sentinel", ROOT),
 ]
