@@ -151,14 +151,72 @@ def main() -> int:
     bad, why = verify_token(t)
     assert not bad and "legs don't match" in why[-1], why
 
+    # ---- redemption must be physically settled by the fulfiller ----
+    from provenance.token import make_fulfillment, _receipt_body
+    ppf, opf, af, bf, _ = fresh()
+    assetf = register_rwa(AssetRegistry(), build(), creator="acct:op")
+    grocer = Actor.create("grocer", "Grocer", "grocer", "acct:grocer")
+    custody_ref = next(e["hash"] for e in ppf["events"] if e["type"] == "CUSTODY")
+    tokf = AssetToken(backing_asset_id=assetf.asset_id, passport_head=ppf["chain_head"],
+                      unit="u", total_supply=100, issuer=opf, fulfiller=grocer, ts="t0")
+
+    # 10. with a fulfiller, redeeming with NO receipt is refused
+    try:
+        tokf.redeem(opf, 10, ts="t1")
+        assert False, "redeem without receipt should raise"
+    except TokenError:
+        pass
+
+    # 11. a receipt signed by someone other than the registered fulfiller is refused
+    imp = Actor.create("imp", "Imposter", "grocer", "acct:grocer")
+    forged = {"token_id": tokf.token_id, "delivery_ref": custody_ref, "units": 10,
+              "fulfiller": "grocer", "ts": "t1"}
+    forged["sig"] = imp.sign(_receipt_body(forged))     # wrong key, right account/id
+    forged["pubkey"] = imp.pubkey_hex
+    try:
+        tokf.redeem(opf, 10, receipt=forged, ts="t1")
+        assert False, "forged receipt should raise"
+    except TokenError:
+        pass
+
+    # 12. a valid, fulfiller-co-signed receipt lets redemption through, and it
+    #     verifies as anchored to the passport's signed custody event
+    good = make_fulfillment(grocer, token_id=tokf.token_id, delivery_ref=custody_ref,
+                            units=10, ts="t1")
+    tokf.redeem(opf, 10, receipt=good, ts="t2")
+    okf, whyf = verify_token(tokf.to_dict(), backing_passport=ppf)
+    assert okf and any("anchored" in n for n in whyf), whyf
+
+    # 13. a receipt that doesn't cover the shares is refused
+    short = make_fulfillment(grocer, token_id=tokf.token_id, delivery_ref=custody_ref,
+                             units=3, ts="t3")
+    try:
+        tokf.redeem(opf, 10, receipt=short, ts="t3")
+        assert False, "under-covered receipt should raise"
+    except TokenError:
+        pass
+
+    # 14. a redemption anchored to a delivery NOT in the passport is caught by verify
+    _, opg, _, _, _ = fresh()
+    tokg = AssetToken(backing_asset_id="x", passport_head=ppf["chain_head"],
+                      unit="u", total_supply=100, issuer=opg, fulfiller=grocer, ts="t0")
+    bogus = make_fulfillment(grocer, token_id=tokg.token_id, delivery_ref="00" * 32,
+                             units=10, ts="t1")
+    tokg.redeem(opg, 10, receipt=bogus, ts="t2")        # locally valid receipt...
+    assert verify_token(tokg.to_dict())[0]              # ...passes with no backing
+    bad, why = verify_token(tokg.to_dict(), backing_passport=ppf)
+    assert not bad and "not anchored" in why[-1], why   # ...but not anchored in the chain
+
     # round-trips as plain JSON, verifiable offline by anyone
     assert verify_token(json.loads(json.dumps(td)))[0]
     assert verify_token(json.loads(json.dumps(td9)), backing_passport=pp9)[0]
+    assert verify_token(json.loads(json.dumps(tokf.to_dict())), backing_passport=ppf)[0]
 
-    print("OK — token issued/transferred/redeemed (85/100 circulating, 15 redeemed); "
-          "live + forged overdraft blocked; unauthorized transfer, tamper, forged "
-          "signer, reorder, supply fudging all caught by replay; token bound to its "
-          "verified provenance (wrong pin rejected).")
+    print("OK — token issued/sold/redeemed; overdraft, unauthorized transfer, "
+          "tamper, forged signer, reorder, supply fudging & fabricated payouts all "
+          "caught by replay; sale proceeds route to the rancher; token bound to its "
+          "verified provenance; and redemption requires a fulfiller-co-signed receipt "
+          "anchored to a real delivery event in the passport.")
     return 0
 
 

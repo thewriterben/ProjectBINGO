@@ -48,7 +48,8 @@ from .demo.make_design import bracket_stl, clip_stl
 from provenance.register import register_rwa, passport_of
 from provenance.passport import verify_passport, Actor
 from provenance.demo import build as build_wagyu_passport, certificate_html
-from provenance.token import AssetToken, verify_token, token_settlement
+from provenance.token import (AssetToken, verify_token, token_settlement,
+                              make_fulfillment)
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "out")
 _lock = threading.Lock()
@@ -109,11 +110,20 @@ def seed_tokens() -> dict:
     op = Actor.create("dgd-wagyu", "DGD Wagyu Co.", "operation", "acct:op:dgd-wagyu")
     chef = Actor.create("river-grill", "River Grill (Ketchum)", "buyer",
                         "acct:buyer:river-grill")
+    grocer = Actor.create("sun-valley-mkt", "Sun Valley Market", "grocer",
+                          "acct:grocer:sun-valley")
+    custody_ref = next((e["hash"] for e in pp["events"] if e["type"] == "CUSTODY"), "")
     tok = AssetToken(backing_asset_id=rwa.asset_id, passport_head=pp["chain_head"],
                      unit=f'1/100 of lot {pp["subject"]["lot"]}', total_supply=100,
-                     issuer=op, value_split=value_split, ts="2026-07-31T18:00:00Z")
+                     issuer=op, value_split=value_split, fulfiller=grocer,
+                     ts="2026-07-31T18:00:00Z")
     # a primary sale routes proceeds through the provenance split (the rancher paid)
     tok.sell(op, chef.account, 40, price_cents=4000, ts="2026-07-31T18:05:00Z")
+    # a claim exercised: grocer co-signs physical fulfillment, anchored to custody
+    receipt = make_fulfillment(grocer, token_id=tok.token_id, delivery_ref=custody_ref,
+                               units=12, ts="2026-08-02T19:55:00Z")
+    tok.redeem(chef, 12, receipt=receipt, note="12 portions served",
+               ts="2026-08-02T20:00:00Z")
     return {tok.token_id: tok.to_dict()}
 
 

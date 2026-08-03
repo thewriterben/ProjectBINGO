@@ -58,6 +58,44 @@ def route(amount_cents: int, payees: list) -> list:
     return legs
 
 
+def _receipt_body(r: dict) -> bytes:
+    return canonical_json({k: r[k] for k in
+                           ("token_id", "delivery_ref", "units", "fulfiller", "ts")})
+
+
+def make_fulfillment(fulfiller: Actor, *, token_id: str, delivery_ref: str,
+                     units: int, ts: str) -> dict:
+    """A signed attestation by the physical custodian that `units` of this
+    token's underlying good were handed over. `delivery_ref` points at the
+    delivery/custody event in the backing provenance passport (by its hash),
+    so redemption is anchored to a real, signed movement of the physical thing.
+    """
+    r = {"token_id": token_id, "delivery_ref": delivery_ref, "units": units,
+         "fulfiller": fulfiller.actor_id, "ts": ts}
+    r["sig"] = fulfiller.sign(_receipt_body(r))
+    r["pubkey"] = fulfiller.pubkey_hex
+    return r
+
+
+def _check_receipt(receipt: dict, fulfiller_rec: dict, token_id: str,
+                   shares: int) -> bool:
+    """Verify a receipt under the token's REGISTERED fulfiller key (not the
+    key the receipt carries), for this token, covering at least `shares`."""
+    if not receipt:
+        return False
+    if receipt.get("fulfiller") != fulfiller_rec.get("actor_id"):
+        return False
+    if receipt.get("token_id") != token_id:
+        return False
+    if receipt.get("units", 0) < shares:
+        return False
+    try:
+        return crypto_verify(_receipt_body(receipt), receipt["sig"],
+                             fulfiller_rec["pubkey"])
+    except (ValueError, KeyError):
+        return False
+
+
 def _sale_legs(price_cents: int, primary: bool, royalty_bps: int,
                seller_account: str, value_split: list) -> list:
     """Primary sale funds the whole value chain (proceeds -> provenance split,
@@ -77,7 +115,8 @@ class AssetToken:
 
     def __init__(self, *, backing_asset_id: str, passport_head: str,
                  unit: str, total_supply: int, issuer: Actor,
-                 value_split=None, ts: str | None = None):
+                 value_split=None, fulfiller: Actor | None = None,
+                 ts: str | None = None):
         if total_supply <= 0:
             raise TokenError("total_supply must be positive")
         self.backing_asset_id = backing_asset_id
@@ -88,6 +127,10 @@ class AssetToken:
         # the value-routing split from the provenance passport (rancher included);
         # embedded so sale proceeds are routable AND independently re-checkable.
         self.value_split = _payees(value_split)
+        # the party authorized to attest physical delivery; if set, a share can
+        # only be REDEEMED against a receipt this party co-signed. None = shares
+        # may be retired (burned) without a physical-settlement claim.
+        self.fulfiller = fulfiller.public() if fulfiller else None
         self.holders: dict[str, dict] = {}          # actor_id -> public record
         self.balances: dict[str, int] = {}          # account -> shares
         self.retired = 0
@@ -157,15 +200,23 @@ class AssetToken:
         self.balances[buyer_account] = self.balances.get(buyer_account, 0) + shares
         return legs
 
-    def redeem(self, holder: Actor, shares: int, note: str = "", ts: str | None = None):
-        """Retire shares when the underlying claim is exercised (e.g. the cut
-        is physically delivered). Reduces the holder's balance and total supply."""
+    def redeem(self, holder: Actor, shares: int, receipt: dict | None = None,
+               note: str = "", ts: str | None = None):
+        """Retire shares when the underlying claim is physically settled. If the
+        token has a designated fulfiller, redemption REQUIRES a receipt that
+        fulfiller co-signed (see make_fulfillment) — you cannot mark a claim
+        fulfilled unless the party who moved the physical good says it moved."""
         if shares <= 0:
             raise TokenError("shares must be positive")
         if self.balances.get(holder.account, 0) < shares:
             raise TokenError("insufficient balance to redeem")
-        self._emit(holder, "REDEEM",
-                   {"account": holder.account, "shares": shares, "note": note}, ts=ts)
+        data = {"account": holder.account, "shares": shares, "note": note}
+        if self.fulfiller:
+            if not _check_receipt(receipt, self.fulfiller, self.token_id, shares):
+                raise TokenError("redemption requires a valid fulfillment receipt "
+                                 "co-signed by the fulfiller (physical settlement)")
+            data["receipt"] = receipt
+        self._emit(holder, "REDEEM", data, ts=ts)
         self.balances[holder.account] -= shares
         self.retired += shares
         return self.balances
@@ -176,7 +227,7 @@ class AssetToken:
             "backing_asset_id": self.backing_asset_id,
             "passport_head": self.passport_head, "unit": self.unit,
             "total_supply": self.total_supply, "issuer": self.issuer,
-            "value_split": self.value_split,
+            "value_split": self.value_split, "fulfiller": self.fulfiller,
             "holders": self.holders, "events": self.events,
             "balances": {k: v for k, v in self.balances.items() if v},
             "retired": self.retired,
@@ -230,9 +281,11 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
         return False, ["token must open with an ISSUE event"]
 
     supply = token.get("total_supply", 0)
+    fulfiller = token.get("fulfiller")
     bal: dict[str, int] = {}
     retired = 0
     prev = ZERO
+    delivery_refs: list[str] = []          # passport anchors to check against backing
 
     for ev in events:
         who = ev.get("signer", "")
@@ -274,6 +327,12 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
                 return False, notes + [f"event {ev['seq']}: redeem signer != account"]
             if bal.get(d["account"], 0) < d["shares"]:
                 return False, notes + [f"event {ev['seq']}: redeem overdraft"]
+            if fulfiller:
+                if not _check_receipt(d.get("receipt"), fulfiller,
+                                      token["token_id"], d["shares"]):
+                    return False, notes + [f"event {ev['seq']}: redemption not "
+                                           f"physically settled (bad/missing receipt)"]
+                delivery_refs.append(d["receipt"]["delivery_ref"])
             bal[d["account"]] -= d["shares"]
             retired += d["shares"]
         elif t == "SALE":
@@ -311,9 +370,19 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
             return False, notes + ["backing passport does not verify: " + pnotes[-1]]
         if backing_passport.get("chain_head") != token.get("passport_head"):
             return False, notes + ["token not pinned to this passport's chain head"]
+        # every physical redemption must anchor to a real signed event in the
+        # provenance chain — a redemption can't claim a delivery that never happened
+        passport_hashes = {e["hash"] for e in backing_passport.get("events", [])}
+        for ref in delivery_refs:
+            if ref not in passport_hashes:
+                return False, notes + ["redemption not anchored to a delivery "
+                                       "event in the passport"]
         if backing_passport.get("subject", {}):
             notes.append("backed by verified provenance "
                          f"({backing_passport['chain_head'][:12]}…)")
+        if delivery_refs:
+            notes.append(f"{len(delivery_refs)} redemption(s) anchored to signed "
+                         f"passport delivery events")
 
     circ = supply - retired
     notes.append(f"{len(events)} ledger events, {len(holders)} holder(s); "
