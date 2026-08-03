@@ -50,6 +50,7 @@ from provenance.passport import verify_passport, Actor
 from provenance.demo import build as build_wagyu_passport, certificate_html
 from provenance.token import (AssetToken, verify_token, token_settlement,
                               make_fulfillment)
+from provenance.earnings_rollup import network_earnings
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "out")
 _lock = threading.Lock()
@@ -254,6 +255,7 @@ def _dashboard():
         "carrier_cents": LEDGER.balance(CARRIER_ACCOUNT),
         "recent": [{"order_id": e.order_id, "job_id": e.job_id, "kind": e.kind,
                     "legs": len(e.legs)} for e in LEDGER.journal[-8:]],
+        "network_earnings": network_earnings(LEDGER, REG, TOKENS),
     }
 
 
@@ -403,6 +405,7 @@ a{color:#79c0ff}</style></head><body><main>
 
 <section><h2>Assets (L1) — designs & provenance-verified real-world goods</h2><table id=assets></table></section>
 <section><h2>Tokenized claims — ownership backed by verified provenance</h2><table id=tokens></table></section>
+<section><h2>Who got paid — designers, real-world goods & token sales, one picture</h2><table id=paid></table></section>
 <section><h2>Nodes (L2)</h2><table id=nodes></table></section>
 <section><h2>Recent settlements (L4)</h2><table id=recent></table></section>
 <p style="color:var(--dim);font-size:.8rem">Agent-first API: <code>GET /api/assets</code>,
@@ -427,6 +430,11 @@ async function load(){
  $('#nodes').innerHTML='<tr><th>node</th><th>tier</th><th>materials</th><th>rep(F)</th><th>key</th></tr>'+n.map(x=>
   `<tr><td>${x.name}</td><td>${x.tier}</td><td>${x.materials.join(', ')}</td><td>${x.reputation_F}</td><td><code>${x.public_key}</code></td></tr>`).join('');
  const d=await j('/api/dashboard');
+ const ne=d.network_earnings||[];
+ $('#paid').innerHTML='<tr><th>account</th><th>design royalties</th><th>RWA sale</th><th>token sales</th><th>total</th></tr>'+ne.map(r=>{
+  const s=r.sources,c=v=>v?('$'+(v/100).toFixed(2)):'<span style=color:#30363d>·</span>';
+  const hl=r.account.includes('rancher')||r.account==='acct:ben';
+  return `<tr${hl?' style=color:#4ade80':''}><td><a href="/creator/${encodeURIComponent(r.account)}">${r.account.replace('acct:','')}</a></td><td class=amt>${c(s.design_royalties)}</td><td class=amt>${c(s.rwa_sale)}</td><td class=amt>${c(s.token_sales)}</td><td class=amt>$${(r.total_cents/100).toFixed(2)}</td></tr>`}).join('');
  const cr=Object.values(d.creator_earnings).reduce((a,b)=>a+b,0);
  $('#royalties').textContent='$'+(cr/100).toFixed(2);
  $('#units').textContent=d.units_fabricated;$('#orders').textContent=d.orders;
