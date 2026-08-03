@@ -26,6 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from .passport import verify_passport
 from .token import verify_token
+from .transport import verify_transport, escrow_decision
 
 
 def _load(path: str) -> dict:
@@ -40,6 +41,9 @@ def _label(doc: dict) -> str:
         return f'passport · {s.get("product", "?")} · lot {s.get("lot", "?")}'
     if "token" in schema:
         return f'token · {doc.get("unit", "?")} · {doc.get("token_id", "")[:12]}…'
+    if "transport" in schema:
+        s = doc.get("subject", {})
+        return f'transport · {s.get("vehicle", "?")} · VIN {s.get("vin", "?")}'
     return "unknown document"
 
 
@@ -51,6 +55,14 @@ def verify_doc(doc: dict, backing: dict | None = None) -> tuple[bool, list[str]]
         return verify_passport(doc)
     if "token" in schema:
         return verify_token(doc, backing_passport=backing)
+    if "transport" in schema:
+        ok, notes = verify_transport(doc)
+        if ok:
+            dec = escrow_decision(doc)
+            notes = notes + [f"escrow {dec['status']}"
+                             + (f" → ${dec['amount_cents']/100:,.2f} to the bound carrier"
+                                if dec.get("release") else "")]
+        return ok, notes
     return False, [f"unrecognized schema: {schema or '(none)'}"]
 
 

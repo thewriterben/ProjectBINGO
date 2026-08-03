@@ -30,6 +30,7 @@ SUITE = [
     ("rwa tokenization (ownership ledger)", "tests.test_token", V3),
     ("unified network earnings", "tests.test_network_earnings", V3),
     ("provenance/token verifier CLI", "tests.test_verify_cli", V3),
+    ("auto-transport custody + anti-double-broker", "tests.test_transport", V3),
     ("k2 driver (fake moonraker)", "tests.test_k2_driver", V3),
     ("sentinel classifier", "sentinel.test_sentinel", ROOT),
 ]
