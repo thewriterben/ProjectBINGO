@@ -108,8 +108,52 @@ def main() -> int:
     bad, why = verify_token(tok3.to_dict(), backing_passport=pp)
     assert not bad and "not pinned" in why[-1], why
 
+    # ---- priced sales route proceeds through the provenance split ----
+    from provenance.token import token_settlement
+    from bingo.models import canonical_json, sha256_hex
+
+    pp9, op9, a9, b9, _ = fresh()
+    vsplit = next(e["data"]["split"]["payees"]
+                  for e in pp9["events"] if e["type"] == "SALE")
+    reg9 = AssetRegistry()
+    asset9 = register_rwa(reg9, build(), creator="acct:op")
+    tok9 = AssetToken(backing_asset_id=asset9.asset_id, passport_head=pp9["chain_head"],
+                      unit="1/100", total_supply=100, issuer=op9,
+                      value_split=vsplit, ts="t0")
+    tok9.sell(op9, a9.account, 40, price_cents=4000, ts="t1")             # primary
+    tok9.sell(a9, b9.account, 10, price_cents=1000, resale_royalty_bps=500, ts="t2")  # resale
+    td9 = tok9.to_dict()
+    ok, why = verify_token(td9, backing_passport=pp9)
+    assert ok, why
+
+    st = token_settlement(td9)
+    # primary 4000¢ fully routed to the provenance split; resale seller keeps 95%
+    assert st["proceeds_cents"] == 5000
+    assert st["paid"].get("acct:a") == 950                 # 1000 - 5% royalty
+    # rancher (22%) is paid on the primary AND on the resale royalty
+    assert st["paid"]["acct:rancher:sadu"] == (4000 * 2200 // 10000) + (50 * 2200 // 10000)
+
+    # 9. a fabricated payout (validly signed, but legs don't match the split) is caught
+    _, op10, a10, b10, _ = fresh()
+    tok10 = AssetToken(backing_asset_id="x", passport_head="p", unit="u",
+                       total_supply=100, issuer=op10, value_split=vsplit, ts="t0")
+    t = tok10.to_dict()
+    ev = {"seq": 1, "ts": "t9", "type": "SALE", "signer": "op",
+          "data": {"from": "acct:op", "to": "acct:a", "shares": 10, "price_cents": 1000,
+                   "primary": True, "royalty_bps": 0,
+                   "legs": [{"account": "acct:op", "cents": 1000}]},   # should route to split
+          "prev_hash": t["events"][-1]["hash"]}
+    body = canonical_json({k: ev[k] for k in
+                           ("seq", "ts", "type", "signer", "data", "prev_hash")})
+    ev["sig"] = op10.sign(body)
+    ev["hash"] = sha256_hex(body + ev["sig"].encode())
+    t["events"].append(ev)
+    bad, why = verify_token(t)
+    assert not bad and "legs don't match" in why[-1], why
+
     # round-trips as plain JSON, verifiable offline by anyone
     assert verify_token(json.loads(json.dumps(td)))[0]
+    assert verify_token(json.loads(json.dumps(td9)), backing_passport=pp9)[0]
 
     print("OK — token issued/transferred/redeemed (85/100 circulating, 15 redeemed); "
           "live + forged overdraft blocked; unauthorized transfer, tamper, forged "

@@ -48,7 +48,7 @@ from .demo.make_design import bracket_stl, clip_stl
 from provenance.register import register_rwa, passport_of
 from provenance.passport import verify_passport, Actor
 from provenance.demo import build as build_wagyu_passport, certificate_html
-from provenance.token import AssetToken, verify_token
+from provenance.token import AssetToken, verify_token, token_settlement
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "out")
 _lock = threading.Lock()
@@ -104,13 +104,16 @@ def seed_tokens() -> dict:
     if not rwa:
         return {}
     pp = passport_of(REG, rwa)
+    value_split = next((e["data"]["split"]["payees"]
+                        for e in pp["events"] if e["type"] == "SALE"), [])
     op = Actor.create("dgd-wagyu", "DGD Wagyu Co.", "operation", "acct:op:dgd-wagyu")
     chef = Actor.create("river-grill", "River Grill (Ketchum)", "buyer",
                         "acct:buyer:river-grill")
     tok = AssetToken(backing_asset_id=rwa.asset_id, passport_head=pp["chain_head"],
                      unit=f'1/100 of lot {pp["subject"]["lot"]}', total_supply=100,
-                     issuer=op, ts="2026-07-31T18:00:00Z")
-    tok.transfer(op, chef.account, 40, ts="2026-07-31T18:05:00Z")
+                     issuer=op, value_split=value_split, ts="2026-07-31T18:00:00Z")
+    # a primary sale routes proceeds through the provenance split (the rancher paid)
+    tok.sell(op, chef.account, 40, price_cents=4000, ts="2026-07-31T18:05:00Z")
     return {tok.token_id: tok.to_dict()}
 
 
@@ -178,11 +181,13 @@ def _tokens() -> list:
     out = []
     for tid, td in TOKENS.items():
         ok, _ = _verify_token(td)
+        st = token_settlement(td)
         out.append({"token_id": tid, "unit": td["unit"],
                     "backing_asset_id": td["backing_asset_id"],
                     "total_supply": td["total_supply"],
                     "circulating": td["circulating"], "retired": td["retired"],
-                    "holders": len(td["balances"]), "verified": ok})
+                    "holders": len(td["balances"]), "verified": ok,
+                    "proceeds_cents": st["proceeds_cents"], "paid": st["paid"]})
     return out
 
 
@@ -191,7 +196,8 @@ def _token(token_id: str) -> dict:
     if not td:
         return {"error": "not found"}
     ok, notes = _verify_token(td)
-    return {"token_id": token_id, "verify": {"ok": ok, "notes": notes}, "token": td}
+    return {"token_id": token_id, "verify": {"ok": ok, "notes": notes},
+            "settlement": token_settlement(td), "token": td}
 
 
 def _token_for_asset(asset_id: str) -> dict | None:
@@ -404,8 +410,9 @@ async function load(){
   return `<tr><td>${x.title}${badge}</td><td>${kind}</td><td>${x.split.map(s=>`<a href="/creator/${encodeURIComponent(s.account)}">${s.account.replace('acct:','')}</a> `+(s.bps/100)+'%').join(' · ')}</td></tr>`}).join('');
  const sel=$('#asset');sel.innerHTML=a.filter(x=>x.kind!=='rwa').map(x=>`<option value=${x.asset_id}>${x.title}</option>`).join('');
  const tk=await j('/api/tokens');
- $('#tokens').innerHTML=tk.length?('<tr><th>token</th><th>unit</th><th>circulating</th><th>holders</th><th>verified</th></tr>'+tk.map(t=>
-  `<tr><td><code>${t.token_id.slice(0,12)}…</code></td><td>${t.unit}</td><td>${t.circulating}/${t.total_supply}${t.retired?` <span style=color:#8b949e>(${t.retired} redeemed)</span>`:''}</td><td>${t.holders}</td><td style=color:${t.verified?'#4ade80':'#f85149'}>${t.verified?'✓ replayed':'✗'}</td></tr>`).join('')):'<tr><td>no tokens</td></tr>';
+ const rancherPaid=t=>{const k=Object.keys(t.paid||{}).find(a=>a.includes('rancher'));return k?t.paid[k]:0};
+ $('#tokens').innerHTML=tk.length?('<tr><th>token</th><th>unit</th><th>circulating</th><th>proceeds</th><th>→ rancher</th><th>verified</th></tr>'+tk.map(t=>
+  `<tr><td><code>${t.token_id.slice(0,12)}…</code></td><td>${t.unit}</td><td>${t.circulating}/${t.total_supply}${t.retired?` <span style=color:#8b949e>(${t.retired} redeemed)</span>`:''}</td><td class=amt>$${((t.proceeds_cents||0)/100).toFixed(2)}</td><td class=amt>$${(rancherPaid(t)/100).toFixed(2)}</td><td style=color:${t.verified?'#4ade80':'#f85149'}>${t.verified?'✓ replayed':'✗'}</td></tr>`).join('')):'<tr><td>no tokens</td></tr>';
  const n=await j('/api/nodes');
  $('#nodes').innerHTML='<tr><th>node</th><th>tier</th><th>materials</th><th>rep(F)</th><th>key</th></tr>'+n.map(x=>
   `<tr><td>${x.name}</td><td>${x.tier}</td><td>${x.materials.join(', ')}</td><td>${x.reputation_F}</td><td><code>${x.public_key}</code></td></tr>`).join('');

@@ -17,7 +17,7 @@ from bingo.registry import AssetRegistry
 from .demo import build
 from .passport import Actor
 from .register import register_rwa
-from .token import AssetToken, verify_token
+from .token import AssetToken, verify_token, token_settlement
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "out", "token")
 
@@ -36,15 +36,22 @@ def main() -> int:
     chef = Actor.create("river-grill", "River Grill (Ketchum)", "buyer", "acct:buyer:river-grill")
     club = Actor.create("wagyu-club", "Wagyu Club member", "holder", "acct:holder:club")
 
+    # the value-routing split comes straight from the passport (rancher included)
+    value_split = next(e["data"]["split"]["payees"]
+                       for e in pp["events"] if e["type"] == "SALE")
+
     # issue 100 shares of this one lot, pinned to its provenance
     tok = AssetToken(backing_asset_id=asset.asset_id, passport_head=pp["chain_head"],
                      unit=f'1/100 of lot {pp["subject"]["lot"]}', total_supply=100,
-                     issuer=op, ts="2026-07-31T18:00:00Z")
+                     issuer=op, value_split=value_split, ts="2026-07-31T18:00:00Z")
 
-    # primary distribution + a secondary transfer + a redemption
-    tok.transfer(op, chef.account, 40, ts="2026-07-31T18:05:00Z")
-    tok.transfer(op, club.account, 25, ts="2026-07-31T18:06:00Z")
-    tok.transfer(club, chef.account, 10, ts="2026-08-01T09:00:00Z")   # secondary market
+    # PRIMARY sales — proceeds route through the provenance split (rancher paid)
+    tok.sell(op, chef.account, 40, price_cents=4000, ts="2026-07-31T18:05:00Z")
+    tok.sell(op, club.account, 25, price_cents=2500, ts="2026-07-31T18:06:00Z")
+    # SECONDARY sale — seller keeps proceeds, 5% resale royalty routes to the split
+    tok.sell(club, chef.account, 10, price_cents=1250, resale_royalty_bps=500,
+             ts="2026-08-01T09:00:00Z")
+    # claim exercised: cut delivered & served
     tok.redeem(chef, 15, note="15 portions plated & served", ts="2026-08-02T20:00:00Z")
 
     td = tok.to_dict()
@@ -62,6 +69,9 @@ def main() -> int:
             detail = f'mint {d["shares"]} → {d["to"]}'
         elif e["type"] == "TRANSFER":
             detail = f'{d["shares"]}  {d["from"]} → {d["to"]}'
+        elif e["type"] == "SALE":
+            kind = "primary" if d["primary"] else f'resale {d["royalty_bps"]/100:g}% royalty'
+            detail = f'{d["shares"]} sh @ ${d["price_cents"]/100:.2f} ({kind})  {d["from"]} → {d["to"]}'
         else:
             detail = f'redeem {d["shares"]} ({d["note"]})'
         print(f"  {e['seq']}. {e['type']:<9} {detail}  [{who}]")
@@ -71,6 +81,12 @@ def main() -> int:
         print(f"  {acct:<24} {n:>3} shares")
     print(f"  {'(redeemed/retired)':<24} {td['retired']:>3} shares")
     print(f"  circulating: {td['circulating']}/{td['total_supply']}")
+
+    st = token_settlement(td)
+    print(f"\ntoken sale settlement — ${st['proceeds_cents']/100:.2f} in proceeds routed:")
+    for acct, cents in st["paid"].items():
+        star = "  ← the rancher, paid on every claim sold" if "rancher" in acct else ""
+        print(f"  {acct:<24} ${cents/100:>7.2f}{star}")
 
     ok, notes = verify_token(td, backing_passport=pp)
     print(f"\nverify_token (with backing) → {'OK' if ok else 'FAIL'}")
