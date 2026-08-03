@@ -25,6 +25,7 @@ SUITE = [
     ("persisted evidence + verifier", "tests.test_verifier", V3),
     ("settlement adapter", "tests.test_settlement_adapter", V3),
     ("creator earnings", "tests.test_earnings", V3),
+    ("provenance passport (RWA)", "tests.test_passport", V3),
     ("k2 driver (fake moonraker)", "tests.test_k2_driver", V3),
     ("sentinel classifier", "sentinel.test_sentinel", ROOT),
 ]
