@@ -24,7 +24,7 @@ import argparse
 import sys
 
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 from .models import Derivation, License, LicenseTemplate, Split, SplitPayee
 from .registry import AssetRegistry

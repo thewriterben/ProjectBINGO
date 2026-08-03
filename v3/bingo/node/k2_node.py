@@ -34,7 +34,7 @@ import sys
 
 # Windows consoles often default to cp1252; keep the runner's output portable.
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 import re
 

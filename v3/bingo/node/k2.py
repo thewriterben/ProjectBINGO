@@ -189,6 +189,7 @@ class K2Driver:
         started = time.time()
         milestones = list(FRAME_MILESTONES)
         last_reported = -1.0
+        last_narrated = -1.0                  # throttle live progress prints
         snap = self.snapshot_url()
 
         while True:
@@ -206,11 +207,16 @@ class K2Driver:
 
             if progress - last_reported >= TELEMETRY_MIN_DELTA or state == "complete":
                 last_reported = progress
+                nozzle = round(float(status.get("extruder", {}).get("temperature") or 0), 1)
+                bed = round(float(status.get("heater_bed", {}).get("temperature") or 0), 1)
                 yield {"type": "TELEMETRY", "stage": state,
-                       "progress": round(progress, 4),
-                       "nozzle_c": round(float(status.get("extruder", {}).get("temperature") or 0), 1),
-                       "bed_c": round(float(status.get("heater_bed", {}).get("temperature") or 0), 1),
+                       "progress": round(progress, 4), "nozzle_c": nozzle, "bed_c": bed,
                        "print_duration_s": round(float(ps.get("print_duration") or 0), 1)}
+                # live, throttled: one line per ~10% so a watcher sees motion
+                if progress - last_narrated >= 0.10 or state == "complete":
+                    last_narrated = progress
+                    self.say(f"    [k2] {unit_serial} {state} {progress*100:4.0f}%  "
+                             f"nozzle {nozzle}°C bed {bed}°C")
 
             while milestones and progress >= milestones[0]:
                 pct = milestones.pop(0)
