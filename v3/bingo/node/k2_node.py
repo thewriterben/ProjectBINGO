@@ -140,7 +140,8 @@ def main(argv=None):
                           materials=["PLA", "PETG", "ABS", "ASA"], kw=0.35)],
         reputation=0.6)
     agent = NodeAgent(node, driver=driver)
-    orch = Orchestrator(registry, ledger, [agent])
+    orch = Orchestrator(registry, ledger, [agent],
+                        evidence_dir=os.path.join(OUT_DIR, "evidence"))
 
     asset = registry.register(
         kind="design" if not args.printer_file else "design-gcode",

@@ -46,7 +46,8 @@ def build_network() -> list[NodeAgent]:
 def main():
     registry, ledger = AssetRegistry(), Ledger()
     agents = build_network()
-    orch = Orchestrator(registry, ledger, agents)
+    orch = Orchestrator(registry, ledger, agents,
+                        evidence_dir=os.path.join(OUT_DIR, "evidence"))
     say = print
 
     say("═" * 72)

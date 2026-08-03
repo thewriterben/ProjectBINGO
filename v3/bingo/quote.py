@@ -61,10 +61,11 @@ def per_unit_royalty_cents(asset: Asset, declared_use: str) -> int:
 
 def quote_job(node: NodeInfo, asset: Asset, dfm: DfmReport, qty: int,
               material: str, buyer_lat: float, buyer_lon: float,
-              declared_use: str) -> JobQuote:
+              declared_use: str, grade_multiplier: float = 1.0) -> JobQuote:
     machine = node.machines[0]
     hours = dfm.est_hours_per_unit * qty
-    fabrication = round(hours * node.rate_cents_per_hour)
+    # premium finish costs more machine time + care + QA → scales fabrication
+    fabrication = round(hours * node.rate_cents_per_hour * grade_multiplier)
     material_c = round(dfm.est_grams_per_unit * qty * MATERIAL_CENTS_PER_G.get(material, 4))
     energy = round(hours * machine.kw * KWH_CENTS)
     km = haversine_km(node.lat, node.lon, buyer_lat, buyer_lon)

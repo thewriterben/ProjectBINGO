@@ -186,6 +186,8 @@ class Job:
     logistics_cents: int = 0
     royalty_lines: list[RoyaltyLine] = field(default_factory=list)
     fee_cents: int = 0
+    grade: str = "F"                  # acceptance grade (F/S/P)
+    checklist_hash: str = ""          # frozen acceptance checklist, committed in PoF
 
     @property
     def royalty_cents(self) -> int:
@@ -211,6 +213,7 @@ class Order:
     buyer_lat: float
     buyer_lon: float
     declared_use: str = "commercial"
+    grade: str = "F"                  # acceptance grade declared at intake
     jobs: list[Job] = field(default_factory=list)
     total_cents: int = 0
     created_at: str = field(default_factory=now_iso)

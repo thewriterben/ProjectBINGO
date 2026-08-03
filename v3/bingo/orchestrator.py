@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import uuid
 
+from . import evidence
+from .acceptance import (Grade, GRADE_MULTIPLIER, GRADE_MIN_TIER, GRADE_NAME,
+                        build_checklist, checklist_hash)
 from .dfm import analyze, DfmReport
 from .ledger import Ledger
 from .match import score_nodes, allocate
@@ -25,28 +28,36 @@ class OrderRejected(Exception):
 
 
 class Orchestrator:
-    def __init__(self, registry: AssetRegistry, ledger: Ledger, nodes: list[NodeAgent]):
+    def __init__(self, registry: AssetRegistry, ledger: Ledger, nodes: list[NodeAgent],
+                 evidence_dir: str | None = None):
         self.registry = registry
         self.ledger = ledger
         self.nodes = {a.info.node_id: a for a in nodes}
         self.orders: dict[str, Order] = {}
+        self.evidence_dir = evidence_dir   # if set, persist each settled job's chain
 
     # -- intake -> quote -> match -> escrow ------------------------------------
 
     def place_order(self, *, buyer: str, asset_id: str, qty: int, material: str,
                     buyer_lat: float, buyer_lon: float,
                     declared_use: str = "commercial",
-                    required_tier: int = 0,
+                    grade: Grade = Grade.F,
+                    required_tier: int | None = None,
                     dfm_override: DfmReport | None = None,
                     extra_royalty_assets: list | None = None) -> tuple[Order, DfmReport]:
         """dfm_override: for assets that aren't raw STL (e.g. pre-sliced,
         already-proven gcode), the caller supplies time/mass estimates
         instead of geometric analysis.
+        grade: acceptance grade (F/S/P) — sets price multiplier, minimum node
+        tier, and the frozen acceptance checklist committed into each job.
         extra_royalty_assets: additional Assets (e.g. a process package, a
         derivative parent) whose per-unit royalty rides on this order — each
         settles to its OWN effective split, not the design's."""
         asset = self.registry.get(asset_id)
         extra_royalty_assets = extra_royalty_assets or []
+        grade = Grade(grade)
+        # grade dictates the floor tier; explicit required_tier can only raise it
+        tier = max(GRADE_MIN_TIER[grade], required_tier or 0)
 
         if dfm_override is not None:
             dfm = dfm_override
@@ -60,12 +71,20 @@ class Orchestrator:
             raise OrderRejected(f"DFM failed: {dfm.issues}")
 
         scored = score_nodes([a.info for a in self.nodes.values()],
-                             required_tier=required_tier, material=material,
+                             required_tier=tier, material=material,
                              buyer_lat=buyer_lat, buyer_lon=buyer_lon)
+        if not scored:
+            raise OrderRejected(
+                f"no node meets grade {grade.value} ({GRADE_NAME[grade]}, "
+                f"min tier {tier}) for {material}")
         allocation = allocate(qty, scored)
 
+        checklist = build_checklist(grade, asset.title, material)
+        cl_hash = checklist_hash(checklist)
+
         quotes = [quote_job(node, asset, dfm, q, material, buyer_lat, buyer_lon,
-                            declared_use) for node, q in allocation]
+                            declared_use, GRADE_MULTIPLIER[grade])
+                  for node, q in allocation]
         # design royalty (per quote) + one extra line per extra asset, each at
         # its own per-unit rate. jq.royalty_cents carries the TOTAL for the
         # fee/subtotal math; the per-asset breakdown lives in royalty_lines.
@@ -78,7 +97,7 @@ class Orchestrator:
         order = Order(order_id=f"ord-{uuid.uuid4().hex[:8]}", buyer=buyer,
                       asset_id=asset_id, qty=qty, material=material,
                       buyer_lat=buyer_lat, buyer_lon=buyer_lon,
-                      declared_use=declared_use, total_cents=total)
+                      declared_use=declared_use, grade=grade.value, total_cents=total)
         for jq in quotes:
             lines = [RoyaltyLine(asset.asset_id, design_royalty[id(jq)],
                                  asset.effective_split.payees)]
@@ -94,7 +113,8 @@ class Orchestrator:
                       energy_cents=jq.energy_cents,
                       logistics_cents=jq.logistics_cents,
                       royalty_lines=lines,
-                      fee_cents=jq.fee_cents)
+                      fee_cents=jq.fee_cents,
+                      grade=grade.value, checklist_hash=cl_hash)
             assert job.royalty_cents == jq.royalty_cents, "royalty lines must sum to quoted royalty"
             order.jobs.append(job)
 
@@ -117,7 +137,8 @@ class Orchestrator:
         for job in order.jobs:
             agent = self.nodes[job.node_id]
             terms = {"job_id": job.job_id, "qty": job.qty,
-                     "payment_cents": job.job_total_cents}
+                     "payment_cents": job.job_total_cents,
+                     "grade": job.grade, "checklist_hash": job.checklist_hash}
             if not agent.offer(job, terms):
                 job.state = JobState.FAILED
                 narrate(f"  ✗ {agent.info.name} declined {job.job_id} (re-route in v0.2)")
@@ -138,6 +159,10 @@ class Orchestrator:
             settled.append(job)
             narrate(f"    ✓ settled atomically — journal entry #{entry.entry_id}, "
                     f"{len(entry.legs)} legs")
+            if self.evidence_dir:
+                path = evidence.save(job, agent.public_key_hex, self.evidence_dir)
+                narrate(f"    ↳ evidence persisted: {path} "
+                        f"(verify: python -m bingo.verify {path})")
         return settled
 
     @staticmethod

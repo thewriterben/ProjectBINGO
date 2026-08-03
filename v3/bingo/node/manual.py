@@ -115,23 +115,30 @@ def main(argv=None):
     ap.add_argument("--operator", default="acct:operator")
     ap.add_argument("--machine", default="halot-mage-pro")
     ap.add_argument("--rate", type=int, default=400, help="cents/hour")
+    ap.add_argument("--grade", default="P", choices=["F", "S", "P"],
+                    help="acceptance grade (DGD token = P, premium finish)")
     args = ap.parse_args(argv)
 
     registry = AssetRegistry.load(args.store)
     design = registry.get(args.design_id)
     package = registry.get(args.package_id) if args.package_id else None
 
+    from ..acceptance import Grade, GRADE_MIN_TIER
+    grade = Grade(args.grade)
+
     ledger = Ledger()
     node = NodeInfo(
         node_id=f"n-{uuid.uuid4().hex[:6]}", operator=args.operator,
-        name=args.node_name, lat=0.0, lon=0.0, tier=1,
+        name=args.node_name, lat=0.0, lon=0.0,
+        tier=max(1, GRADE_MIN_TIER[grade]),   # certified premium node for P work
         rate_cents_per_hour=args.rate,
         machines=[Machine(machine_id=args.machine, make_model=args.machine,
                           process="msla", envelope_mm=(228, 128, 230),
                           materials=[args.material], kw=0.10)],
         materials_on_hand=[args.material], reputation=0.6)
     agent = NodeAgent(node, driver=ManualDriver(args.machine))
-    orch = Orchestrator(registry, ledger, [agent])
+    orch = Orchestrator(registry, ledger, [agent],
+                        evidence_dir=os.path.join(OUT_DIR, "evidence"))
 
     dfm = DfmReport(ok=True, issues=[], triangles=0, bbox_mm=(0, 0, 0),
                     volume_mm3=0.0, est_grams_per_unit=args.grams,
@@ -140,8 +147,10 @@ def main(argv=None):
     order, dfm = orch.place_order(buyer=args.buyer, asset_id=design.asset_id,
                                   qty=args.qty, material=args.material,
                                   buyer_lat=0.0, buyer_lon=0.0,
-                                  required_tier=1, dfm_override=dfm,
+                                  grade=grade, dfm_override=dfm,
                                   extra_royalty_assets=[package] if package else None)
+    print(f"✓ grade {grade.value} — acceptance checklist frozen "
+          f"({order.jobs[0].checklist_hash[:12]}…)")
     if package:
         print(f"✓ package royalty attached: {package.license.per_unit_cents}¢/unit → "
               f"'{package.title}' (settles to its own split)")
