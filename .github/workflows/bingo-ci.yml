@@ -1,0 +1,20 @@
+name: BINGO CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["v3/**", "sentinel/**", "run_tests.py", ".github/workflows/bingo-ci.yml"]
+  pull_request:
+    paths: ["v3/**", "sentinel/**", "run_tests.py", ".github/workflows/bingo-ci.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # No dependencies — the whole suite is stdlib only. That's the point.
+      - name: Run BINGO + Sentinel test suite
+        run: python run_tests.py

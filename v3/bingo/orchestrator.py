@@ -16,6 +16,7 @@ from .acceptance import (Grade, GRADE_MULTIPLIER, GRADE_MIN_TIER, GRADE_NAME,
                         build_checklist, checklist_hash)
 from .dfm import analyze, DfmReport
 from .ledger import Ledger
+from .reputation import ReputationBook
 from .match import score_nodes, allocate
 from .models import Asset, Job, JobState, Order, RoyaltyLine
 from .node.agent import NodeAgent
@@ -29,12 +30,13 @@ class OrderRejected(Exception):
 
 class Orchestrator:
     def __init__(self, registry: AssetRegistry, ledger: Ledger, nodes: list[NodeAgent],
-                 evidence_dir: str | None = None):
+                 evidence_dir: str | None = None, reputation_book=None):
         self.registry = registry
         self.ledger = ledger
         self.nodes = {a.info.node_id: a for a in nodes}
         self.orders: dict[str, Order] = {}
         self.evidence_dir = evidence_dir   # if set, persist each settled job's chain
+        self.reputation = reputation_book if reputation_book is not None else ReputationBook()
 
     # -- intake -> quote -> match -> escrow ------------------------------------
 
@@ -72,7 +74,8 @@ class Orchestrator:
 
         scored = score_nodes([a.info for a in self.nodes.values()],
                              required_tier=tier, material=material,
-                             buyer_lat=buyer_lat, buyer_lon=buyer_lon)
+                             buyer_lat=buyer_lat, buyer_lon=buyer_lon,
+                             reputation_book=self.reputation, grade=grade.value)
         if not scored:
             raise OrderRejected(
                 f"no node meets grade {grade.value} ({GRADE_NAME[grade]}, "
@@ -139,8 +142,11 @@ class Orchestrator:
             terms = {"job_id": job.job_id, "qty": job.qty,
                      "payment_cents": job.job_total_cents,
                      "grade": job.grade, "checklist_hash": job.checklist_hash}
+            proc = agent.info.machines[0].process
             if not agent.offer(job, terms):
                 job.state = JobState.FAILED
+                self.reputation.node(job.node_id, agent.info.reputation) \
+                    .record_failure(job.grade, proc)
                 narrate(f"  ✗ {agent.info.name} declined {job.job_id} (re-route in v0.2)")
                 continue
             narrate(f"  ▸ {agent.info.name} accepted {job.job_id} ({job.qty} units)")
@@ -154,11 +160,14 @@ class Orchestrator:
 
             assert NodeAgent.verify_chain(job, agent.public_key_hex), \
                 "PoF chain signature verification failed"
-            entry = self.ledger.settle_job(order, job)
+            receipt = self.ledger.settle_job(order, job)
             job.state = JobState.SETTLED
             settled.append(job)
-            narrate(f"    ✓ settled atomically — journal entry #{entry.entry_id}, "
-                    f"{len(entry.legs)} legs")
+            # network records the outcome — reputation is earned, not claimed
+            self.reputation.node(job.node_id, agent.info.reputation) \
+                .record_completion(job.grade, proc, on_time=True, qa_pass=True)
+            narrate(f"    ✓ settled atomically — {receipt.ref}, "
+                    f"{len(receipt.legs)} legs")
             if self.evidence_dir:
                 path = evidence.save(job, agent.public_key_hex, self.evidence_dir)
                 narrate(f"    ↳ evidence persisted: {path} "

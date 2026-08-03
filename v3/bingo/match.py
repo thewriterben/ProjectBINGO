@@ -22,7 +22,11 @@ class ScoredNode:
 
 def score_nodes(nodes: list[NodeInfo], *, required_tier: int, material: str,
                 buyer_lat: float, buyer_lon: float,
-                rate_ceiling_cents: int = 3000) -> list[ScoredNode]:
+                rate_ceiling_cents: int = 3000,
+                reputation_book=None, grade: str = "F") -> list[ScoredNode]:
+    """If a ReputationBook is supplied, reputation is grade-aware and
+    network-maintained (a node's proven consistency at THIS grade/process);
+    otherwise fall back to the node's flat prior. Expelled nodes are excluded."""
     scored = []
     for n in nodes:
         if n.tier < required_tier:
@@ -32,10 +36,18 @@ def score_nodes(nodes: list[NodeInfo], *, required_tier: int, material: str,
         # declared inventory: a capable-but-dry node doesn't stall the run
         if n.materials_on_hand is not None and material not in n.materials_on_hand:
             continue
+        proc = n.machines[0].process
+        if reputation_book is not None:
+            rep = reputation_book.node(n.node_id, prior=n.reputation)
+            if rep.expelled:
+                continue
+            rep_score = rep.score(grade, proc)
+        else:
+            rep_score = n.reputation
         km = haversine_km(n.lat, n.lon, buyer_lat, buyer_lon)
         distance_score = max(0.0, 1.0 - km / 3000.0)          # 0 beyond ~3000 km
         price_score = max(0.0, 1.0 - n.rate_cents_per_hour / rate_ceiling_cents)
-        score = 0.40 * n.reputation + 0.35 * distance_score + 0.25 * price_score
+        score = 0.40 * rep_score + 0.35 * distance_score + 0.25 * price_score
         scored.append(ScoredNode(node=n, score=score, km=km))
     scored.sort(key=lambda s: s.score, reverse=True)
     return scored

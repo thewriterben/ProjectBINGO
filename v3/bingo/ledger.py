@@ -11,16 +11,9 @@ import json
 from dataclasses import dataclass, field
 
 from .models import Job, Order, now_iso
-
-NETWORK_ACCOUNT = "acct:network"
-CARRIER_ACCOUNT = "acct:carrier-pool"
-
-
-@dataclass
-class Leg:
-    account: str
-    amount_cents: int
-    memo: str
+from .settlement import (SettlementBackend, SettlementError, SettlementReceipt,
+                        Leg, compute_settlement_legs, node_account,
+                        NETWORK_ACCOUNT, CARRIER_ACCOUNT)
 
 
 @dataclass
@@ -34,11 +27,10 @@ class JournalEntry:
     provenance: dict = field(default_factory=dict)
 
 
-class SettlementError(Exception):
-    pass
+class Ledger(SettlementBackend):
+    """Local double-entry implementation of SettlementBackend (the demo/dev
+    path). Same leg math as every other backend via compute_settlement_legs."""
 
-
-class Ledger:
     def __init__(self):
         self.balances: dict[str, int] = {}
         self.escrow: dict[str, int] = {}       # order_id -> remaining cents
@@ -79,34 +71,8 @@ class Ledger:
                 f"escrow underfunded for {job.job_id}: "
                 f"{self.escrow.get(order.order_id, 0)} < {total}")
 
-        node_account = job_node_account(job)
-        legs: list[Leg] = [
-            Leg(node_account, job.fabrication_cents + job.material_cents + job.energy_cents,
-                "fabrication + material + energy"),
-            Leg(CARRIER_ACCOUNT, job.logistics_cents, "logistics"),
-        ]
-
-        # Royalty legs, PER ASSET: each line routes through its own split.
-        # This is the ONLY code path that pays fabrication, and it cannot pay
-        # fabrication without paying every registered royalty line.
-        for line in job.royalty_lines:
-            tag = line.asset_id[:8]
-            distributed = 0
-            line_legs: list[Leg] = []
-            for p in line.payees:
-                amt = (line.cents * p.bps) // 10_000
-                if amt > 0:
-                    line_legs.append(Leg(p.account, amt, f"royalty {p.bps}bps [{tag}]"))
-                    distributed += amt
-            residue = line.cents - distributed             # integer-floor residue
-            if line_legs and residue > 0:
-                line_legs[0].amount_cents += residue       # deterministic: first payee
-            legs.extend(line_legs)
-
-        legs.append(Leg(NETWORK_ACCOUNT, job.fee_cents, "network fee (3%)"))
-
-        # invariant 1: conservation of cents
-        assert sum(l.amount_cents for l in legs) == total, "settlement legs != escrow decrement"
+        # shared leg math — identical across every backend (asserts conservation)
+        legs = compute_settlement_legs(job)
 
         self.escrow[order.order_id] -= total
         for l in legs:
@@ -117,12 +83,16 @@ class Ledger:
                      provenance={"asset_id": job.asset_id, "node_id": job.node_id,
                                  "qty": job.qty, "pof_chain_head": job.chain_head(),
                                  "royalty_assets": [l.asset_id for l in job.royalty_lines]})
-        return self.journal[-1]
+        entry = self.journal[-1]
+        return SettlementReceipt(ref=f"journal#{entry.entry_id}", legs=entry.legs)
 
     # -- reporting --------------------------------------------------------------
 
     def balance(self, account: str) -> int:
         return self.balances.get(account, 0)
+
+    def escrow_remaining(self, order_id: str) -> int:
+        return self.escrow.get(order_id, 0)
 
     def to_json(self) -> str:
         return json.dumps({
@@ -138,5 +108,5 @@ class Ledger:
         }, indent=2)
 
 
-def job_node_account(job: Job) -> str:
-    return f"acct:node:{job.node_id}"
+# back-compat alias (leg account helper now lives in settlement.py)
+job_node_account = node_account

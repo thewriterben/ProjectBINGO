@@ -1,0 +1,285 @@
+"""L5 — Web surface: browsable marketplace, live dashboard, agent-first API.
+
+Stdlib only. Runs a live in-memory network (designs, nodes, ledger,
+orchestrator) so you can browse it and place orders that really fabricate and
+settle. The JSON API is the point: within a few years the modal buyer is
+somebody's AI assistant ordering a part — this is the endpoint it calls.
+
+  python -m bingo.server            # http://127.0.0.1:8760
+  python -m bingo.server --port 9000 --host 0.0.0.0
+
+API:
+  GET  /api/health
+  GET  /api/assets                designs + process packages, with royalty splits
+  GET  /api/nodes                 nodes + grade-aware reputation
+  GET  /api/dashboard             network totals + recent settlements
+  POST /api/orders                {asset_id, qty, material?, grade?, buyer?}
+                                  → places, fabricates, settles; returns the receipt
+  GET  /api/orders/<id>           order status + per-job settlement
+  GET  /api/verify/<job_id>       independently verify that job's persisted PoF
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
+
+from . import evidence
+from .acceptance import Grade, GRADE_NAME
+from .ledger import Ledger, NETWORK_ACCOUNT, CARRIER_ACCOUNT
+from .models import (Derivation, License, LicenseTemplate, Machine, NodeInfo,
+                    Split, SplitPayee)
+from .node.agent import NodeAgent
+from .orchestrator import Orchestrator, OrderRejected
+from .registry import AssetRegistry
+from .demo.make_design import bracket_stl, clip_stl
+
+OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "out")
+_lock = threading.Lock()
+
+
+def seed_network():
+    reg, ledger = AssetRegistry(), Ledger()
+    bracket = reg.register(
+        kind="design", title="PB-001 shelf bracket", creator="acct:ben",
+        content=bracket_stl(),
+        license=License(LicenseTemplate.COMMERCIAL_PER_UNIT, per_unit_cents=40),
+        split=Split([SplitPayee("acct:ben", 8000), SplitPayee("acct:alex", 2000)]))
+    reg.register(
+        kind="design", title="PB-002 cable clip (remix of PB-001)", creator="acct:carol",
+        content=clip_stl(),
+        license=License(LicenseTemplate.COMMERCIAL_PER_UNIT, per_unit_cents=25),
+        split=Split([SplitPayee("acct:carol", 10000)]),
+        derives_from=[Derivation(bracket.asset_id, parent_share_bps=2000)])
+
+    def fdm(mid, model, kw=0.12):
+        return Machine(machine_id=mid, make_model=model, process="fdm",
+                       envelope_mm=(250, 250, 250), materials=["PLA", "PETG"], kw=kw)
+
+    nodes = [
+        NodeInfo(node_id="n-slc", operator="acct:dana", name="Dana's spare-room Bambu (SLC)",
+                 lat=40.76, lon=-111.89, tier=0, rate_cents_per_hour=250,
+                 machines=[fdm("m-x1c", "Bambu X1C")], reputation=0.55),
+        NodeInfo(node_id="n-abq", operator="acct:mia", name="Mia's print farm (ABQ)",
+                 lat=35.08, lon=-106.65, tier=1, rate_cents_per_hour=400,
+                 machines=[fdm("m-mk4", "Prusa MK4", 0.10)], reputation=0.72),
+        NodeInfo(node_id="n-kc", operator="acct:ray", name="Ray's job shop (KC)",
+                 lat=39.10, lon=-94.58, tier=2, rate_cents_per_hour=650,
+                 machines=[fdm("m-x1e", "Bambu X1E", 0.14)], reputation=0.85),
+    ]
+    agents = [NodeAgent(n) for n in nodes]
+    orch = Orchestrator(reg, ledger, agents, evidence_dir=os.path.join(OUT_DIR, "evidence"))
+    return reg, ledger, orch, agents
+
+
+REG, LEDGER, ORCH, AGENTS = seed_network()
+
+
+def _assets():
+    out = []
+    for a in REG.all():
+        out.append({"asset_id": a.asset_id, "title": a.title, "kind": a.kind,
+                    "per_unit_cents": a.license.per_unit_cents,
+                    "split": [{"account": p.account, "bps": p.bps}
+                              for p in a.effective_split.payees],
+                    "derived": bool(a.derives_from)})
+    return out
+
+
+def _nodes():
+    out = []
+    for ag in AGENTS:
+        n = ag.info
+        out.append({"node_id": n.node_id, "name": n.name, "operator": n.operator,
+                    "tier": n.tier, "process": n.machines[0].process,
+                    "materials": n.machines[0].materials,
+                    "reputation_F": ORCH.reputation.node_score(n.node_id, "F", "fdm", n.reputation),
+                    "public_key": ag.public_key_hex[:16] + "…"})
+    return out
+
+
+def _dashboard():
+    creators = sorted({p.account for a in REG.all() for p in a.effective_split.payees})
+    orders = list(ORCH.orders.values())
+    units = sum(o.qty for o in orders)
+    return {
+        "orders": len(orders),
+        "units_fabricated": units,
+        "creator_earnings": {c: LEDGER.balance(c) for c in creators if LEDGER.balance(c)},
+        "node_earnings": {ag.info.operator: LEDGER.balance(f"acct:node:{ag.info.node_id}")
+                          for ag in AGENTS},
+        "network_fee_cents": LEDGER.balance(NETWORK_ACCOUNT),
+        "carrier_cents": LEDGER.balance(CARRIER_ACCOUNT),
+        "recent": [{"order_id": e.order_id, "job_id": e.job_id, "kind": e.kind,
+                    "legs": len(e.legs)} for e in LEDGER.journal[-8:]],
+    }
+
+
+def _place_order(body: dict) -> dict:
+    asset_id = body["asset_id"]
+    qty = int(body.get("qty", 1))
+    material = body.get("material", "PLA")
+    grade = Grade(body.get("grade", "F"))
+    buyer = body.get("buyer", "acct:api-buyer")
+    lat = float(body.get("lat", 39.74))
+    lon = float(body.get("lon", -104.99))
+    with _lock:
+        order, dfm = ORCH.place_order(buyer=buyer, asset_id=asset_id, qty=qty,
+                                      material=material, buyer_lat=lat, buyer_lon=lon,
+                                      grade=grade)
+        settled = ORCH.execute_order(order, dfm)
+    creators = sorted({p.account for j in settled for line in j.royalty_lines
+                       for p in line.payees})
+    return {
+        "order_id": order.order_id, "grade": order.grade,
+        "total_cents": order.total_cents, "units": order.qty,
+        "jobs": [{"job_id": j.job_id, "node_id": j.node_id, "qty": j.qty,
+                  "checklist_hash": j.checklist_hash[:12] + "…",
+                  "pof_events": len(j.evidence),
+                  "verify": f"/api/verify/{j.job_id}"} for j in settled],
+        "royalties_paid": {c: LEDGER.balance(c) for c in creators},
+    }
+
+
+def _verify(job_id: str) -> dict:
+    path = os.path.join(OUT_DIR, "evidence", f"{job_id}.json")
+    if not os.path.exists(path):
+        return {"ok": False, "notes": ["no persisted evidence for that job"]}
+    ok, notes = evidence.verify(evidence.load(path))
+    return {"ok": ok, "notes": notes}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _send(self, obj, code=200, ctype="application/json"):
+        body = obj.encode() if isinstance(obj, str) else json.dumps(obj, indent=2).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/" or path == "/index.html":
+            return self._send(PAGE, ctype="text/html")
+        if path == "/api/health":
+            return self._send({"ok": True, "service": "bingo", "nodes": len(AGENTS)})
+        if path == "/api/assets":
+            return self._send(_assets())
+        if path == "/api/nodes":
+            return self._send(_nodes())
+        if path == "/api/dashboard":
+            return self._send(_dashboard())
+        if path.startswith("/api/verify/"):
+            return self._send(_verify(path.rsplit("/", 1)[-1]))
+        if path.startswith("/api/orders/"):
+            oid = path.rsplit("/", 1)[-1]
+            o = ORCH.orders.get(oid)
+            return self._send(o.summary() if o else {"error": "not found"},
+                              200 if o else 404)
+        return self._send({"error": "not found"}, 404)
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            body = json.loads(raw or b"{}")
+        except json.JSONDecodeError:
+            return self._send({"error": "invalid JSON"}, 400)
+        if path == "/api/orders":
+            try:
+                return self._send(_place_order(body))
+            except (OrderRejected, KeyError, ValueError) as e:
+                return self._send({"error": str(e)}, 400)
+        return self._send({"error": "not found"}, 404)
+
+
+PAGE = """<!DOCTYPE html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Project BINGO — network</title><style>
+:root{--bg:#0e1116;--card:#161b22;--ink:#e6edf3;--dim:#8b949e;--acc:#4ade80;--line:#242b36}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+font:15px/1.55 system-ui,sans-serif;padding:1.5rem 1rem 4rem}main{max-width:1000px;margin:0 auto}
+h1{font-size:1.1rem;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
+.hero{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.5rem;margin:1rem 0;text-align:center}
+.hero .big{font-size:2.2rem;font-weight:700;color:var(--acc)}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1rem 1.2rem;margin-bottom:1.2rem}
+h2{font-size:.9rem;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin:.2rem 0 .7rem}
+table{width:100%;border-collapse:collapse;font-size:.86rem}td,th{padding:.4rem .5rem;border-top:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--dim);border-top:none}code{color:#79c0ff}.amt{text-align:right;color:var(--acc);font-variant-numeric:tabular-nums}
+button{background:var(--acc);color:#06210f;border:0;border-radius:8px;padding:.5rem .9rem;font-weight:600;cursor:pointer}
+select,input{background:#0d1117;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:.45rem;font:inherit}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}#out{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:.8rem;color:var(--dim);margin-top:.6rem}
+a{color:#79c0ff}</style></head><body><main>
+<h1>Project BINGO · live network</h1>
+<div class=hero><div class=big id=royalties>$0.00</div>
+<p style="color:var(--dim)">paid to creators, atomically, at the moment of fabrication ·
+<span id=units>0</span> units · <span id=orders>0</span> orders</p></div>
+
+<section><h2>Place an order (this really fabricates & settles)</h2>
+<div class=row>
+<select id=asset></select>
+<input id=qty type=number value=5 min=1 style=width:5rem>
+<select id=grade><option value=F>F · Functional</option><option value=S>S · Standard</option><option value=P>P · Premium</option></select>
+<button onclick=order()>Order</button></div>
+<div id=out></div></section>
+
+<section><h2>Designs (L1)</h2><table id=assets></table></section>
+<section><h2>Nodes (L2)</h2><table id=nodes></table></section>
+<section><h2>Recent settlements (L4)</h2><table id=recent></table></section>
+<p style="color:var(--dim);font-size:.8rem">Agent-first API: <code>GET /api/assets</code>,
+<code>POST /api/orders</code>, <code>GET /api/verify/&lt;job&gt;</code>. Every number here is derived from settled ledger entries.</p>
+</main><script>
+const $=s=>document.querySelector(s);
+async function j(u,o){return (await fetch(u,o)).json()}
+async function load(){
+ const a=await j('/api/assets');
+ $('#assets').innerHTML='<tr><th>title</th><th>license</th><th>split</th></tr>'+a.map(x=>
+  `<tr><td>${x.title}${x.derived?' <span style=color:#8b949e>· remix</span>':''}</td><td>${x.per_unit_cents}¢/unit</td><td>${x.split.map(s=>s.account.replace('acct:','')+' '+(s.bps/100)+'%').join(' · ')}</td></tr>`).join('');
+ const sel=$('#asset');sel.innerHTML=a.map(x=>`<option value=${x.asset_id}>${x.title}</option>`).join('');
+ const n=await j('/api/nodes');
+ $('#nodes').innerHTML='<tr><th>node</th><th>tier</th><th>materials</th><th>rep(F)</th><th>key</th></tr>'+n.map(x=>
+  `<tr><td>${x.name}</td><td>${x.tier}</td><td>${x.materials.join(', ')}</td><td>${x.reputation_F}</td><td><code>${x.public_key}</code></td></tr>`).join('');
+ const d=await j('/api/dashboard');
+ const cr=Object.values(d.creator_earnings).reduce((a,b)=>a+b,0);
+ $('#royalties').textContent='$'+(cr/100).toFixed(2);
+ $('#units').textContent=d.units_fabricated;$('#orders').textContent=d.orders;
+ $('#recent').innerHTML='<tr><th>kind</th><th>order</th><th>job</th><th>legs</th></tr>'+d.recent.slice().reverse().map(r=>
+  `<tr><td>${r.kind}</td><td><code>${r.order_id||''}</code></td><td><code>${r.job_id||''}</code></td><td>${r.legs}</td></tr>`).join('');
+}
+async function order(){
+ $('#out').textContent='ordering…';
+ const r=await j('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({asset_id:$('#asset').value,qty:+$('#qty').value,grade:$('#grade').value})});
+ $('#out').textContent=JSON.stringify(r,null,2);load();
+}
+load();
+</script></body></html>"""
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="BINGO web/API server")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8760)
+    args = ap.parse_args(argv)
+    srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    print(f"BINGO network on http://{args.host}:{args.port}  ({len(AGENTS)} nodes, "
+          f"{len(REG.all())} designs seeded)")
+    print("try:  curl -s localhost:%d/api/assets | head" % args.port)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        srv.shutdown()
+
+
+if __name__ == "__main__":
+    main()
