@@ -44,7 +44,7 @@ def main() -> int:
     #    her signature no longer validates under it
     t = copy.deepcopy(pp)
     other = Actor.create("imposter", "Imposter", "rancher", "acct:x")
-    t["signers"]["kestrel-ranch"]["pubkey"] = other.pubkey_hex
+    t["signers"]["sadu-farms"]["pubkey"] = other.pubkey_hex
     bad, why = verify_passport(t)
     assert not bad and "bad signature" in why[-1], why
 

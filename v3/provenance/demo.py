@@ -26,8 +26,8 @@ OUT = os.path.join(os.path.dirname(__file__), "..", "out", "passport")
 def build() -> CutPassport:
     # --- the people (real keys; placeholder identities) --------------------
     op = Actor.create("dgd-wagyu", "DGD Wagyu Co.", "operation", "acct:op:dgd-wagyu")
-    rancher = Actor.create("kestrel-ranch", "Kestrel Ranch — 3rd-generation",
-                           "rancher", "acct:rancher:kestrel")
+    rancher = Actor.create("sadu-farms", "SADU Farms — 3rd-generation",
+                           "rancher", "acct:rancher:sadu")
     proc = Actor.create("wood-river", "Wood River Processing", "processor",
                         "acct:processor:wood-river")
     carrier = Actor.create("sawtooth-cc", "Sawtooth Cold Chain", "carrier",
@@ -47,15 +47,15 @@ def build() -> CutPassport:
     p.attest(op, "LINEAGE", {
         "breed": "Wagyu (Japanese Black)",
         "tajima_pct": 96,
-        "sire": "TF-Itomichi-II", "dam": "KR-Fuku-0912",
-        "animal_id": "KR-2024-118", "born": "2024-03-11",
-        "birth_ranch": "Kestrel Ranch",
+        "sire": "TF-Itomichi-II", "dam": "SF-Fuku-0912",
+        "animal_id": "SF-2024-118", "born": "2024-03-11",
+        "birth_ranch": "SADU Farms",
     }, ts="2024-03-11T09:00:00Z")
 
     # 1 — HUSBANDRY / FEED: the human hook. Signed by the RANCHER herself.
     p.attest(rancher, "HUSBANDRY", {
         "feed": ["ranch-grown alfalfa", "ranch-grown barley", "ranch-grown corn"],
-        "feed_origin": "Kestrel Ranch — grown by a 3rd-generation rancher",
+        "feed_origin": "SADU Farms — grown by a 3rd-generation rancher",
         "ration": "free-choice forage + finishing grain",
         "days_on_feed": 640, "no_hormones": True, "no_antibiotics_finishing": True,
     }, ts="2026-05-20T07:30:00Z")
@@ -85,7 +85,7 @@ def build() -> CutPassport:
     split = Split([
         SplitPayee("acct:grocer:sun-valley", 3000),   # 30% point of sale
         SplitPayee("acct:op:dgd-wagyu", 3000),         # 30% brand / genetics / mgmt
-        SplitPayee("acct:rancher:kestrel", 2200),      # 22% the feed she grew
+        SplitPayee("acct:rancher:sadu", 2200),         # 22% the feed she grew
         SplitPayee("acct:processor:wood-river", 1000), # 10% cut & A5 grading
         SplitPayee("acct:carrier:sawtooth", 800),      # 8%  cold chain
     ])
