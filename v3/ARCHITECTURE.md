@@ -49,6 +49,29 @@ an AI is trained on, and *a share of a printer's future earnings* share nothing
 except being value that changes hands. One engine handling all of them is the
 evidence it's infrastructure, not a niche app.
 
+### The thesis is machine-checked, not asserted
+
+The table above is a claim, and a claim in a doc fails silently. So the "one
+kernel, not seven" thesis is enforced by a conformance suite
+(`tests/test_kernel_thesis.py`) that fails if it stops being true:
+
+- **Kernel identity (static).** Every vertical's content-addressing and signing
+  are the *same code objects* as the kernel's — checked with `is`. If any
+  vertical reimplements sha256 or Ed25519, or a copy drifts, the suite fails.
+  This is "one system, not seven," made mechanical (15 bindings across the
+  verticals today).
+- **Kernel properties (randomized).** Content-addressing, canonical-JSON
+  determinism, Ed25519 soundness, and **conservation-to-the-cent** are asserted
+  as properties over thousands of random inputs — including nasty residues — for
+  three independently-written value routers (token, machine-RWA, training). So a
+  pass is not "the cases we imagined," it's "the invariant held on every trial."
+- **Uniform offline verification.** Every vertical exposes the same
+  `verify(document) -> (ok, notes)` primitive, and tampering *any* event of a
+  live record is caught.
+
+The suite is itself tested for teeth: forking a primitive or dropping a
+value-routing residue makes it fail, as it must.
+
 ### Manufacturing / creator economy
 Designs are content-addressed assets with royalty splits; every fabrication emits
 a signed PoF chain and pays the creator at the moment of the print, with
@@ -107,8 +130,9 @@ securities offering. Demo: `python -m provenance.machine_rwa_demo`. Code:
 
 ## Status
 
-All seven verticals run as stdlib Python, **20/20 test suites** (`python
-run_tests.py`), committed. Passports, tokens, coins, bills-of-lading, training
+All seven verticals run as stdlib Python, **21/21 test suites** (`python
+run_tests.py`) — including a one-kernel conformance suite that machine-checks the
+thesis itself — committed. Passports, tokens, coins, bills-of-lading, training
 corpora, and machine-share instruments verify from the document alone. These are
 working prototypes; real launches need production keys, hosting, and money-rail
 integration — the seams for which are already built (e.g. `DGD_ISSUER_SEED`,

@@ -36,6 +36,7 @@ SUITE = [
     ("dgd coin $25 QR credential + redemption", "tests.test_coin", V3),
     ("coin redemption: persistence + backend", "tests.test_redemption", V3),
     ("k2 driver (fake moonraker)", "tests.test_k2_driver", V3),
+    ("architecture thesis (one-kernel conformance)", "tests.test_kernel_thesis", V3),
     ("sentinel classifier", "sentinel.test_sentinel", ROOT),
 ]
 
