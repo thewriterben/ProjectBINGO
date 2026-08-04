@@ -1,8 +1,8 @@
 # Project BINGO — architecture
 
-One kernel of cryptographic primitives, pointed at five different domains. This
+One kernel of cryptographic primitives, pointed at six different domains. This
 document maps the shared primitives to each vertical and to the code, so a new
-contributor (or a skeptic) can see that it's one system, not five.
+contributor (or a skeptic) can see that it's one system, not six.
 
 ## The thesis
 
@@ -32,7 +32,7 @@ Everything below is built from these, and nothing else:
 6. **Independent verification** — every record verifies from the document alone,
    offline (`bingo/verify.py`, `provenance/verify.py`).
 
-## The five verticals
+## The six verticals
 
 | Vertical | Asset | Event log | Value routing | Code |
 |---|---|---|---|---|
@@ -41,10 +41,12 @@ Everything below is built from these, and nothing else:
 | **Tokenization** | claim pinned to passport head | issue→transfer→sale→redeem | primary→split, resale royalty→split | `provenance/token.py` |
 | **Auto transport** | custody record | booking(bind carrier)→pickup→delivery | escrow releases only to the bound carrier | `provenance/transport.py` |
 | **DGD coins** | coin design + signed credential | persistent redemption ledger | $25 USDC-of-DGD to receiver (backend seam) | `provenance/coin.py`, `coin_server.py` |
+| **Training royalties** | training corpus (its content) | signed attribution corpus | pool→by-contribution→each asset's split | `bingo/training.py` |
 
-The range is the argument: a bracket, a ribeye, a Porsche, and a coin share
-nothing except being value that changes hands. One engine handling all four is
-the evidence it's infrastructure, not a niche app.
+The range is the argument: a bracket, a ribeye, a Porsche, a coin, and *the
+knowledge an AI is trained on* share nothing except being value that changes
+hands. One engine handling all of them is the evidence it's infrastructure, not a
+niche app.
 
 ### Manufacturing / creator economy
 Designs are content-addressed assets with royalty splits; every fabrication emits
@@ -75,10 +77,24 @@ redeem) + a persistent single-use ledger (no double-redeem, survives restarts) +
 a `ValidationBackend` seam for the USDC-of-DGD crediting. Page/API in
 `provenance/coin_server.py`; batch mint in `provenance/coin_batch.py`.
 
+### Training-material royalties
+The mission turned on AI itself: automation pays the people it learned from. A
+signed, content-addressed **attribution corpus** records which registered assets
+(print profiles, failure datasets, design libraries) trained a model version and
+by how much — tamper/forge/reorder caught offline. A `RoyaltyMeter` accrues a
+pool from the model's fee-earning *usage*, single-use per event (no double count);
+`distribute` splits the pool by contribution share, then each asset's cut through
+its own split (co-authors, derivative parents), to the cent. A fine-tune can
+declare a base corpus + share, so its usage also pays the base model's teachers —
+the training analogue of derivative royalties. Per-asset accounting, not a pooled
+"AI bonus" — the thing nobody has built for functional design knowledge.
+Demo: `python -m bingo.demo.training`. Code: `bingo/training.py`.
+
 ## Status
 
-All five verticals run as stdlib Python, **18/18 test suites** (`python
-run_tests.py`), committed. Passports, tokens, coins, and bills-of-lading verify
-from the document alone. These are working prototypes; real launches need
-production keys, hosting, and money-rail integration — the seams for which are
-already built (e.g. `DGD_ISSUER_SEED`, `ValidationBackend`, `SettlementBackend`).
+All six verticals run as stdlib Python, **19/19 test suites** (`python
+run_tests.py`), committed. Passports, tokens, coins, bills-of-lading, and
+training corpora verify from the document alone. These are working prototypes;
+real launches need production keys, hosting, and money-rail integration — the
+seams for which are already built (e.g. `DGD_ISSUER_SEED`, `ValidationBackend`,
+`SettlementBackend`).

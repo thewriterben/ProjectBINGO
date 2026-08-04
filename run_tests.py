@@ -25,6 +25,7 @@ SUITE = [
     ("persisted evidence + verifier", "tests.test_verifier", V3),
     ("settlement adapter", "tests.test_settlement_adapter", V3),
     ("creator earnings", "tests.test_earnings", V3),
+    ("training-material royalties", "tests.test_training", V3),
     ("provenance passport (RWA)", "tests.test_passport", V3),
     ("rwa as first-class asset", "tests.test_rwa_asset", V3),
     ("rwa tokenization (ownership ledger)", "tests.test_token", V3),
