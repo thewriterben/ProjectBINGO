@@ -1,8 +1,8 @@
 # Project BINGO — architecture
 
-One kernel of cryptographic primitives, pointed at six different domains. This
+One kernel of cryptographic primitives, pointed at seven different domains. This
 document maps the shared primitives to each vertical and to the code, so a new
-contributor (or a skeptic) can see that it's one system, not six.
+contributor (or a skeptic) can see that it's one system, not seven.
 
 ## The thesis
 
@@ -32,7 +32,7 @@ Everything below is built from these, and nothing else:
 6. **Independent verification** — every record verifies from the document alone,
    offline (`bingo/verify.py`, `provenance/verify.py`).
 
-## The six verticals
+## The seven verticals
 
 | Vertical | Asset | Event log | Value routing | Code |
 |---|---|---|---|---|
@@ -42,11 +42,12 @@ Everything below is built from these, and nothing else:
 | **Auto transport** | custody record | booking(bind carrier)→pickup→delivery | escrow releases only to the bound carrier | `provenance/transport.py` |
 | **DGD coins** | coin design + signed credential | persistent redemption ledger | $25 USDC-of-DGD to receiver (backend seam) | `provenance/coin.py`, `coin_server.py` |
 | **Training royalties** | training corpus (its content) | signed attribution corpus | pool→by-contribution→each asset's split | `bingo/training.py` |
+| **Machine RWA** | a machine's future revenue | open→buy*→earn* (signed cap table) | pro-rata to backers, capped at repayment | `provenance/machine_rwa.py` |
 
-The range is the argument: a bracket, a ribeye, a Porsche, a coin, and *the
-knowledge an AI is trained on* share nothing except being value that changes
-hands. One engine handling all of them is the evidence it's infrastructure, not a
-niche app.
+The range is the argument: a bracket, a ribeye, a Porsche, a coin, the knowledge
+an AI is trained on, and *a share of a printer's future earnings* share nothing
+except being value that changes hands. One engine handling all of them is the
+evidence it's infrastructure, not a niche app.
 
 ### Manufacturing / creator economy
 Designs are content-addressed assets with royalty splits; every fabrication emits
@@ -90,11 +91,25 @@ the training analogue of derivative royalties. Per-asset accounting, not a poole
 "AI bonus" — the thing nobody has built for functional design knowledge.
 Demo: `python -m bingo.demo.training`. Code: `bingo/training.py`.
 
+### Machine RWA / node financing
+Finance a machine by selling shares of its future revenue. A signed,
+content-addressed **offering** fixes the terms (shares, price, the investor
+revenue share, a repayment cap); a hash-chained, Ed25519-signed **cap table**
+(OPEN → BUY* → EARN*) records the raise and every payout, and rejects
+oversubscription. As the machine earns, each event streams the investor pool
+**pro-rata to shareholders, capped at repayment** (then 100% reverts to the
+operator), conserving to the cent — a signed-but-false distribution is caught by
+re-derivation on replay. The distinctive part: only **PoF-verified** ledger
+revenue may fund a distribution (`verified_machine_revenue`), so the collateral's
+income stream is itself provable. Framed as a technical primitive, not a
+securities offering. Demo: `python -m provenance.machine_rwa_demo`. Code:
+`provenance/machine_rwa.py`.
+
 ## Status
 
-All six verticals run as stdlib Python, **19/19 test suites** (`python
-run_tests.py`), committed. Passports, tokens, coins, bills-of-lading, and
-training corpora verify from the document alone. These are working prototypes;
-real launches need production keys, hosting, and money-rail integration — the
-seams for which are already built (e.g. `DGD_ISSUER_SEED`, `ValidationBackend`,
-`SettlementBackend`).
+All seven verticals run as stdlib Python, **20/20 test suites** (`python
+run_tests.py`), committed. Passports, tokens, coins, bills-of-lading, training
+corpora, and machine-share instruments verify from the document alone. These are
+working prototypes; real launches need production keys, hosting, and money-rail
+integration — the seams for which are already built (e.g. `DGD_ISSUER_SEED`,
+`ValidationBackend`, `SettlementBackend`).
