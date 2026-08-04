@@ -36,19 +36,18 @@ def register_asset(reg: AssetRegistry):
     with open(os.path.join(HERE, "dgd_coin.stl"), "rb") as f:
         stl = f.read()
     return reg.register(
-        kind="design", title="DGD promo coin (Stunning Kasi 1)",
-        creator="acct:designer:kasi", content=stl,
+        kind="design", title="DGD promo coin",
+        creator="acct:ben", content=stl,
         license=License(LicenseTemplate.COMMERCIAL_PER_UNIT, per_unit_cents=0),
-        split=Split([SplitPayee("acct:designer:kasi", 4000),
-                     SplitPayee("acct:dgd:foundation", 4000),
-                     SplitPayee("acct:ben", 2000)]))
+        split=Split([SplitPayee("acct:ben", 5000),
+                     SplitPayee("acct:dgd:foundation", 5000)]))  # placeholder — adjust
 
 
 def coin_passport(asset_id, serial, designer, printer, issuer) -> CutPassport:
     p = CutPassport(subject={"product": "DGD promo coin", "serial": serial,
                              "asset_id": asset_id[:16]})
-    p.attest(designer, "DESIGN", {"asset_id": asset_id, "title": "Stunning Kasi 1",
-                                  "designer": "Kasi"}, ts="2026-08-03T20:00:00Z")
+    p.attest(designer, "DESIGN", {"asset_id": asset_id, "title": "DGD promo coin",
+                                  "designer": "Ben"}, ts="2026-08-03T20:00:00Z")
     p.attest(printer, "FABRICATION", {"printer": "Creality Halot Mage Pro (MSLA)",
                                       "resin": "Siraya Tech Blu V2 Clear",
                                       "layer_um": 50, "resin_ml": 3.76, "serial": serial},
@@ -69,13 +68,13 @@ def main() -> int:
                                  for p in asset.effective_split.payees))
 
     dgd = Actor.create("dgd", "Digital Gold Foundation (issuer)", "issuer", "acct:dgd:foundation")
-    kasi = Actor.create("kasi", "Kasi (designer)", "designer", "acct:designer:kasi")
+    ben = Actor.create("ben", "Ben (designer)", "designer", "acct:ben")
     node = Actor.create("ben-msla", "Ben's Halot Mage Pro", "node", "acct:node:ben-msla")
 
     coins = []  # (serial, passport_dict, credential, scratch_code)
     for n in range(1, 4):
         serial = f"DGD-2026-{n:04d}"
-        pp = coin_passport(asset.asset_id, serial, kasi, node, dgd)
+        pp = coin_passport(asset.asset_id, serial, ben, node, dgd)
         secret = new_secret()
         cred = mint_coin(dgd, serial=serial, passport_head=pp.to_dict()["chain_head"],
                          credit_cents=CREDIT, secret=secret)

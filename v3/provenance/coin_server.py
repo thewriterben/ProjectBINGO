@@ -170,7 +170,7 @@ a{{color:var(--gold)}}.chain{{font-family:ui-monospace,monospace;font-size:.68re
 <div class=card id=card>
   <div class=coin>
     <div class=disc>DGD</div>
-    <div class=amt>$<span id=amt>25</span> <small>validation credits</small></div>
+    <div class=amt>$<span id=amt>25</span> <small>USDC of DGD</small></div>
     <div class=serial id=serial>—</div>
     <div id=badge class="badge spent">awaiting a coin…</div>
     <div class=chain id=chain></div>
@@ -188,8 +188,8 @@ a{{color:var(--gold)}}.chain{{font-family:ui-monospace,monospace;font-size:.68re
   <button onclick="load(SAMPLE_OK)">Try a genuine coin</button>
   <button onclick="load(SAMPLE_BAD)">Try a fake</button></div>
 </div>
-<div class=muted>Each coin is worth $25 once. Authenticity is checked in your browser
-with the issuer's public key; the credit can only be redeemed a single time.</div>
+<div class=muted>Each coin validates $25 USDC worth of DGD to your account, once. Authenticity is
+checked in your browser with the issuer's public key; the credit can only be redeemed a single time.</div>
 
 <script>
 const ISSUER_PUBKEY="{issuer_pubkey}";
@@ -251,7 +251,7 @@ async function redeem(){{
 }}
 function done(ok,v){{
   const r=$('#result'),b=$('#badge');
-  if(ok){{r.className='result ok';r.textContent='✓ $'+Number(v).toFixed(0)+' in validation credits redeemed';
+  if(ok){{r.className='result ok';r.textContent='✓ $'+Number(v).toFixed(0)+' USDC of DGD validated to your account';
     b.className='badge spent';b.textContent='● Redeemed';}}
   else{{r.className='result bad';r.textContent='✕ '+v;$('#redeem').disabled=true;
     b.className='badge spent';b.textContent='● '+String(v).includes('redeemed')?'● Already redeemed':'● Not redeemable';}}
