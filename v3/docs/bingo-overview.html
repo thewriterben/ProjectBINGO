@@ -1,0 +1,126 @@
+<!DOCTYPE html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Project BINGO — one trust layer, proven across five domains</title><style>
+:root{--bg:#0a0c10;--card:#141821;--card2:#1a1f2a;--ink:#eef2f7;--dim:#93a0b3;--line:#232b38;
+--gold:#d4af37;--blue:#4b8bf5;--green:#22c55e;--red:#ef4444;--violet:#c084fc}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(1100px 520px at 50% -8%,#171a12,#0a0c10);
+color:var(--ink);font:16px/1.6 system-ui,-apple-system,sans-serif;padding:2rem 1rem 5rem}
+main{max-width:860px;margin:0 auto}
+.kick{letter-spacing:.3em;text-transform:uppercase;font-size:.72rem;color:var(--gold);font-weight:700;text-align:center}
+h1{font-size:2.1rem;line-height:1.2;text-align:center;margin:.5rem 0 .3rem;font-weight:800}
+.lede{text-align:center;color:var(--dim);font-size:1.12rem;max-width:640px;margin:0 auto 1.4rem}
+.pill{display:inline-block;background:#12331f;color:var(--green);border:1px solid #1f5133;border-radius:99px;
+padding:.2rem .7rem;font-size:.78rem;font-weight:700}
+h2{font-size:.8rem;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin:2.4rem 0 1rem;
+border-bottom:1px solid var(--line);padding-bottom:.5rem}
+.thesis{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.4rem 1.6rem;margin:1.4rem 0;font-size:1.06rem}
+.thesis b{color:var(--gold)}
+/* kernel cards */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+.k{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem}
+.k b{display:block;font-size:.95rem;margin-bottom:.2rem}.k span{color:var(--dim);font-size:.86rem}
+/* architecture map */
+.map{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.4rem;margin:1rem 0}
+.verticals{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-bottom:.7rem}
+.vt{border:1px solid var(--line);border-radius:10px;padding:.6rem .4rem;text-align:center;font-size:.72rem;font-weight:700;background:#10141c}
+.vt small{display:block;color:var(--dim);font-weight:400;font-size:.66rem;margin-top:.2rem}
+.vt.mfg{border-color:#3a4a2a}.vt.rwa{border-color:#4a3a1a}.vt.tok{border-color:#3a2a4a}.vt.tx{border-color:#1a3a4a}.vt.coin{border-color:#4a3a1a}
+.arrow{text-align:center;color:var(--dim);font-size:1.1rem;margin:.2rem 0}
+.kernel{background:linear-gradient(180deg,#1c2230,#141821);border:1px solid var(--gold);border-radius:12px;padding:.9rem 1rem;text-align:center}
+.kernel b{color:var(--gold);letter-spacing:.04em}.kernel .row{display:flex;gap:.4rem;flex-wrap:wrap;justify-content:center;margin-top:.5rem}
+.kernel .row span{background:#0d1017;border:1px solid var(--line);border-radius:99px;padding:.2rem .6rem;font-size:.72rem;color:var(--dim)}
+@media(max-width:640px){.grid,.verticals{grid-template-columns:1fr 1fr}}
+/* vertical detail */
+.v{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.2rem 1.4rem;margin:.9rem 0}
+.v .h{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
+.v h3{margin:0;font-size:1.15rem}.v .dom{color:var(--dim);font-size:.8rem;text-transform:uppercase;letter-spacing:.08em}
+.v .prob{color:var(--dim);margin:.5rem 0}.v .sol{margin:.5rem 0}
+.v .proof{background:#0e1826;border:1px solid #1d3350;border-radius:10px;padding:.6rem .9rem;margin-top:.7rem;font-size:.9rem}
+.v .proof b{color:var(--green)}
+.foot{color:var(--dim);font-size:.86rem;margin-top:1.2rem;line-height:1.6}
+.status{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;font-size:.9rem}
+.status div{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem}
+.status b{color:var(--ink)}
+</style></head><body><main>
+
+<div class=kick>Project BINGO</div>
+<h1>One trust layer, proven across five domains</h1>
+<p class=lede>A small kernel of cryptographic primitives that lets value move between parties
+who don't trust each other — and pays the people who actually created it. The same
+engine runs a print farm, a Wagyu ranch, a car hauler, and a promo coin.</p>
+<p style="text-align:center"><span class=pill>18/18 test suites green · all stdlib · every claim independently verifiable</span></p>
+
+<div class=thesis>The problem isn't that we lack AI or automation — it's that the systems moving
+value run on <b>trust-by-paperwork</b>: a label, an invoice, a promise. BINGO replaces the
+paperwork with proof. Provenance you can check, payment that routes automatically to the
+maker, and fraud that can't <b>settle</b> instead of fraud you have to chase. Built not for
+profit extraction but so a skilled person — a designer, a rancher, a driver — meaningfully
+shares in what their work produces.</div>
+
+<h2>The shared kernel — everything below is built from these</h2>
+<div class=grid>
+  <div class=k><b>Content-addressed assets</b><span>An asset's ID is the hash of its content, so identity can't be separated from the thing — an STL, a provenance passport, a coin.</span></div>
+  <div class=k><b>Ed25519 signatures</b><span>Pure-Python, RFC 8032. Anyone holding a public key can verify — no secret, no server, no trust in the signer.</span></div>
+  <div class=k><b>Hash-chained event logs</b><span>Each event signed and linked to the last. Tamper, reorder, or forge one link and the chain breaks. This is the spine of every record.</span></div>
+  <div class=k><b>Atomic value routing</b><span>A payment splits across everyone who made the value, to the cent, in one transaction — royalty enforced at the point of the transaction.</span></div>
+  <div class=k><b>Single-use ledgers</b><span>A claim can be spent exactly once; a copy is caught by replay, not by trust. Survives restarts.</span></div>
+  <div class=k><b>Independent verification</b><span>Every record verifies from the document alone, offline. A skeptic checks it in seconds without believing a word you say.</span></div>
+</div>
+
+<h2>Architecture map</h2>
+<div class=map>
+  <div class=verticals>
+    <div class="vt mfg">Manufacturing<small>creator royalties</small></div>
+    <div class="vt rwa">RWA provenance<small>Wagyu passport</small></div>
+    <div class="vt tok">Tokenization<small>claims on real assets</small></div>
+    <div class="vt tx">Auto transport<small>anti-double-broker</small></div>
+    <div class="vt coin">DGD coins<small>$25 bearer QR</small></div>
+  </div>
+  <div class=arrow>▲ each is the same kernel, pointed at a different thing ▲</div>
+  <div class=kernel><b>SHARED KERNEL</b>
+    <div class=row><span>content-addressed assets</span><span>Ed25519</span><span>hash-chained logs</span>
+    <span>value routing</span><span>single-use ledgers</span><span>independent verify</span></div>
+  </div>
+  <p class=foot style="margin-bottom:0">The range is the argument: a bracket, a ribeye, a Porsche, and a coin have nothing
+  in common except that each is a thing of value changing hands. That one engine handles all four is the evidence it's
+  infrastructure, not a niche app.</p>
+</div>
+
+<h2>The five verticals</h2>
+
+<div class=v><div class=h><h3>Manufacturing / creator economy</h3><span class=dom>designs → prints</span></div>
+  <p class=prob>A designer's file gets downloaded and printed a thousand times; they see none of it.</p>
+  <p class=sol>The design is a content-addressed asset with a royalty split. Every fabrication emits a signed proof-of-fabrication chain, and payment routes to the creator <em>at the moment of the print</em> — plus network-maintained reputation and grade-based acceptance.</p>
+  <div class=proof>Proven: a real part fabricated on a Creality K2, <b>44 signed PoF events</b>, settled atomically ($0.40 royalty / $1.48 shop / $5.50 logistics). A creator opens one page and sees what every print paid them.</div></div>
+
+<div class=v><div class=h><h3>RWA provenance</h3><span class=dom>premium physical goods</span></div>
+  <p class=prob>A5 Wagyu sells for $65/lb because of its provenance — genetics, feed, grade — yet "Wagyu" is among the most counterfeited words in food. The premium rests on a paper label.</p>
+  <p class=sol>Each cut carries a provenance passport: lineage, husbandry, harvest/grade, cold-chain custody — every link signed by the party who made it. The passport <em>is</em> the asset's content, so its ID binds to the exact chain of custody.</p>
+  <div class=proof>Proven: an A5 ribeye passport that verifies offline, with the third-generation rancher paid <b>$12.87 on a single cut</b> — routed automatically through the sale, not thanked in the marketing.</div></div>
+
+<div class=v><div class=h><h3>Tokenization</h3><span class=dom>claims on real-world assets</span></div>
+  <p class=prob>Tokenizing physical goods (Brazil already does it with cattle) is only as honest as what backs the token. Usually: nothing checkable.</p>
+  <p class=sol>A token is a transferable claim pinned to a verified provenance passport — you can't mint a claim on a thing you can't prove. Ownership is a signed ledger; primary sales route proceeds through the provenance split, and resales carry a royalty back to it. Redemption requires a co-signed physical handoff.</p>
+  <div class=proof>Proven: 100 shares issued, traded, and redeemed against the A5 lot; the rancher earns <b>$14.43 from token activity on top of the physical sale</b>. Double-spend, forged signer, and fabricated payouts all caught on replay.</div></div>
+
+<div class=v><div class=h><h3>Auto transport</h3><span class=dom>vehicle logistics</span></div>
+  <p class=prob>Double brokering — a load secretly re-brokered to an unaccountable carrier — costs the industry an estimated $700M–$1B/year. Every existing tool is <em>detection</em>.</p>
+  <p class=sol>The carrier's identity is cryptographically bound at booking. Pickup and delivery must be signed by that same identity, the customer co-signs condition at delivery, and escrow releases <em>only</em> to the bound carrier. A re-brokered load can't verify, so it can't settle.</p>
+  <div class=proof>Proven: a live demo where a different truck delivering flips the record to <b>REJECTED and escrow BLOCKED</b> — the fraud isn't caught, it simply can't get paid. New damage at delivery becomes an undeniable, both-ends-signed claim.</div></div>
+
+<div class=v><div class=h><h3>DGD promo coins</h3><span class=dom>bearer instrument</span></div>
+  <p class=prob>A $25-redeemable QR coin is money you can photocopy — it needs to resist both counterfeiting and duplication.</p>
+  <p class=sol>The QR is an Ed25519-signed credential (counterfeit fails offline). A scratch-off code, committed by hash and hidden under a tamper-evident panel, means a photographed QR can't redeem. A persistent single-use ledger blocks every replay. A clean backend seam posts $25 USDC-of-DGD to the receiver's account.</p>
+  <div class=proof>Proven: a coin redeems <b>$25 exactly once</b>; counterfeit, photographed QR, and reused code all blocked — and the spent state survives a server restart, so it can't be double-redeemed after a crash.</div></div>
+
+<h2>Status &amp; how to check it</h2>
+<div class=status>
+  <div><b>Built &amp; tested</b><br>All five verticals run as stdlib Python, 18/18 test suites green, committed to the ProjectBINGO repo.</div>
+  <div><b>Verifiable</b><br>Passports, tokens, coins, and bills-of-lading each verify from the document alone via a standalone CLI — no server, no trust required.</div>
+  <div><b>Live demos</b><br>A browsable network, a coin validation page, and a screen-shareable double-broker demo — each backed by real signed records.</div>
+  <div><b>Honest limits</b><br>These are working prototypes. Real launches need production keys, hosting, and money-rail integration — the seams for which are already built.</div>
+</div>
+
+<p class=foot>Project BINGO · a shared trust layer for a post-scarcity economy — where the people who make
+real things share in what those things produce. Every figure above traces to a settled, signed record you can verify yourself.</p>
+</main></body></html>
