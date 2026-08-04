@@ -65,8 +65,14 @@ def main(argv=None):
     ap.add_argument("--out", default="out/coin/batch.csv")
     args = ap.parse_args(argv)
 
-    # DEMO issuer key — replace with DGD's production key for real coins.
-    issuer = Actor.create("dgd", "Digital Gold Foundation", "issuer", "acct:dgd:foundation")
+    # Real coins: set DGD_ISSUER_SEED (64-hex private seed) in the environment.
+    # Without it, a reproducible DEMO key is used (coins won't verify in production).
+    _seed = os.environ.get("DGD_ISSUER_SEED")
+    if not _seed:
+        print("WARNING: DGD_ISSUER_SEED not set — minting with the DEMO key. "
+              "Set it to DGD's real seed for production coins.")
+    issuer = Actor.create("dgd", "Digital Gold Foundation", "issuer", "acct:dgd:foundation",
+                          seed=bytes.fromhex(_seed) if _seed else None)
     rows, creds = mint_batch(issuer, args.count, start=args.start, base=args.base,
                              short=not args.full_qr)
 

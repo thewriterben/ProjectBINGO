@@ -41,9 +41,13 @@ def _coin_passport(serial, issuer):
     return p.to_dict()["chain_head"]
 
 
-# In production these keys live in DGD's custody; here they're deterministic so
-# the demo is reproducible. THE ISSUER PUBKEY BELOW is what the page trusts.
-ISSUER = Actor.create("dgd", "Digital Gold Foundation", "issuer", "acct:dgd:foundation")
+# The issuer key is the root of trust. Set DGD_ISSUER_SEED (64-hex private seed)
+# in the environment to use DGD's real key; without it, a reproducible demo key
+# is used. The private seed never lives in code or the repo — only in the env of
+# whatever machine mints/serves, held in DGD custody.
+_ISSUER_SEED = os.environ.get("DGD_ISSUER_SEED")
+ISSUER = Actor.create("dgd", "Digital Gold Foundation", "issuer", "acct:dgd:foundation",
+                      seed=bytes.fromhex(_ISSUER_SEED) if _ISSUER_SEED else None)
 VALIDATOR = Actor.create("dgd-validator", "DGD Validation", "validator", "acct:dgd:validator")
 REGISTRY = RedemptionRegistry(VALIDATOR, trusted_issuer_pubkey=ISSUER.pubkey_hex)
 
