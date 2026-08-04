@@ -32,6 +32,7 @@ SUITE = [
     ("provenance/token verifier CLI", "tests.test_verify_cli", V3),
     ("auto-transport custody + anti-double-broker", "tests.test_transport", V3),
     ("dgd coin $25 QR credential + redemption", "tests.test_coin", V3),
+    ("coin redemption: persistence + backend", "tests.test_redemption", V3),
     ("k2 driver (fake moonraker)", "tests.test_k2_driver", V3),
     ("sentinel classifier", "sentinel.test_sentinel", ROOT),
 ]

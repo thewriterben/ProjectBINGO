@@ -28,7 +28,7 @@ from urllib.parse import urlparse, parse_qs
 from bingo.models import now_iso
 from .passport import Actor, CutPassport
 from .coin import (mint_coin, qr_payload, qr_url, parse_qr, verify_credential,
-                   RedemptionRegistry, CoinError, new_secret)
+                   RedemptionRegistry, CoinError, new_secret, StubValidationBackend)
 
 _lock = threading.Lock()
 CREDIT = 2500
@@ -49,7 +49,13 @@ _ISSUER_SEED = os.environ.get("DGD_ISSUER_SEED")
 ISSUER = Actor.create("dgd", "Digital Gold Foundation", "issuer", "acct:dgd:foundation",
                       seed=bytes.fromhex(_ISSUER_SEED) if _ISSUER_SEED else None)
 VALIDATOR = Actor.create("dgd-validator", "DGD Validation", "validator", "acct:dgd:validator")
-REGISTRY = RedemptionRegistry(VALIDATOR, trusted_issuer_pubkey=ISSUER.pubkey_hex)
+# Persistent ledger (survives restarts; set DGD_LEDGER_PATH to relocate) +
+# the validation backend seam (swap StubValidationBackend for DGD's real
+# USDC-of-DGD account crediting).
+_LEDGER_PATH = os.environ.get("DGD_LEDGER_PATH", os.path.join(
+    os.path.dirname(__file__), "..", "out", "coin", "redemptions.json"))
+REGISTRY = RedemptionRegistry(VALIDATOR, trusted_issuer_pubkey=ISSUER.pubkey_hex,
+                              store_path=_LEDGER_PATH, backend=StubValidationBackend())
 
 # genuine samples + one counterfeit, for the demo buttons. 0001 is code-less so
 # the standalone page preview is clickable end-to-end; 0002 carries a scratch-off

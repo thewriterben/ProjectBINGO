@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import secrets as _secrets
+from abc import ABC, abstractmethod
 
 from bingo.models import canonical_json, sha256_hex
 from .passport import Actor
@@ -129,18 +131,88 @@ def verify_credential(cred: dict, trusted_issuer_pubkey: str) -> tuple[bool, str
     return True, "authentic DGD credential"
 
 
+# --------------------------------------------------------- validation backend
+
+class ValidationBackend(ABC):
+    """Where the redeemed $25 actually goes. The registry enforces authenticity
+    and single-use; this posts the value — '$25 USDC worth of DGD to the
+    receiver's account'. DGD's real account/validation system implements this;
+    swapping it in changes nothing about the anti-fraud guarantees."""
+
+    @abstractmethod
+    def credit(self, account: str, cents: int, coin_serial: str, ts: str) -> dict:
+        """Post the credit. Return {'ok': bool, 'ref': str}. Raise to signal a
+        transient failure (the redemption stays committed and is retried)."""
+
+
+class StubValidationBackend(ValidationBackend):
+    """Records what it WOULD post. Marks where DGD's USDC-of-DGD crediting plugs
+    in (TODO(real): call DGD's account/validation API here)."""
+
+    def __init__(self):
+        self.postings: list[dict] = []
+
+    def credit(self, account: str, cents: int, coin_serial: str, ts: str) -> dict:
+        ref = f"stub:{coin_serial}"
+        self.postings.append({"account": account, "cents": cents,
+                              "coin_serial": coin_serial, "ts": ts, "ref": ref})
+        return {"ok": True, "ref": ref}
+
+
 # --------------------------------------------------------------- redemption
 
 class RedemptionRegistry:
     """The single-use authority. Retires a coin's credit on first redemption and
-    blocks every replay, in a validator-signed, hash-chained, replayable ledger."""
+    blocks every replay, in a validator-signed, hash-chained, replayable ledger.
 
-    def __init__(self, validator: Actor, trusted_issuer_pubkey: str):
+    Production hardening:
+      * `store_path` persists the ledger; it's reloaded (and re-verified) on
+        start, so a restart never forgets a spent coin. The file is the source of
+        truth — the single-use guarantee survives crashes.
+      * `backend` (a ValidationBackend) posts the actual $25 credit. The coin is
+        marked spent and persisted BEFORE crediting, so a backend hiccup can
+        never double-credit; unposted credits are retried via retry_pending().
+      * loading a TAMPERED ledger file fails closed (raises), because the chain
+        is validator-signed — an edited file can't pass verify_registry.
+    """
+
+    def __init__(self, validator: Actor, trusted_issuer_pubkey: str,
+                 store_path: str | None = None, backend: "ValidationBackend | None" = None):
         self.validator = validator
         self.trusted_issuer_pubkey = trusted_issuer_pubkey
-        self.redeemed: dict[str, dict] = {}     # serial -> redemption record
+        self.store_path = store_path
+        self.backend = backend
+        self.redeemed: dict[str, dict] = {}     # serial -> signed redemption record
         self.credits: dict[str, int] = {}       # account -> credited cents
         self.events: list[dict] = []            # signed hash-chained ledger
+        self.postings: dict[str, dict] = {}     # serial -> backend posting status (unsigned)
+        if store_path and os.path.exists(store_path):
+            self._load()
+
+    def _load(self):
+        with open(self.store_path) as f:
+            data = json.load(f)
+        if data.get("validator", {}).get("pubkey") != self.validator.pubkey_hex:
+            raise CoinError("ledger validator key mismatch — refusing to load")
+        if data.get("trusted_issuer_pubkey") != self.trusted_issuer_pubkey:
+            raise CoinError("ledger issuer key mismatch — refusing to load")
+        ok, notes = verify_registry(data)
+        if not ok:
+            raise CoinError(f"redemption ledger failed verification (tampered?): {notes[-1]}")
+        self.events = data.get("events", [])
+        self.credits = {k: int(v) for k, v in data.get("credits", {}).items()}
+        self.redeemed = {e["data"]["serial"]: e["data"]
+                         for e in self.events if e["type"] == "REDEEM"}
+        self.postings = data.get("postings", {})
+
+    def _persist(self):
+        if not self.store_path:
+            return
+        os.makedirs(os.path.dirname(os.path.abspath(self.store_path)), exist_ok=True)
+        tmp = self.store_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
+        os.replace(tmp, self.store_path)     # atomic — no torn writes
 
     def _emit(self, type_: str, data: dict, ts: str):
         ev = {"seq": len(self.events), "ts": ts, "type": type_,
@@ -151,11 +223,24 @@ class RedemptionRegistry:
         self.events.append(ev)
         return ev
 
+    def _post_credit(self, serial: str, account: str, cents: int, ts: str):
+        posting = {"serial": serial, "account": account, "cents": cents,
+                   "status": "posted" if not self.backend else "pending", "ref": None}
+        if self.backend:
+            try:
+                res = self.backend.credit(account, cents, serial, ts)
+                posting["status"], posting["ref"] = "posted", res.get("ref")
+            except Exception as e:                       # noqa: BLE001 — record, retry later
+                posting["status"], posting["error"] = "pending", str(e)
+        self.postings[serial] = posting
+        return posting
+
     def redeem(self, cred: dict, redeemer_account: str, ts: str,
                secret: str | None = None) -> dict:
         """Validate authenticity, then the physical scratch-off code, then redeem
-        $25 to the redeemer — exactly once. A counterfeit fails authenticity; a
-        photographed QR fails the code check; a copied code fails single-use."""
+        $25 to the redeemer — exactly once, durably. A counterfeit fails
+        authenticity; a photographed QR fails the code check; a copied code fails
+        single-use even across restarts (the ledger is persisted)."""
         ok, why = verify_credential(cred, self.trusted_issuer_pubkey)
         if not ok:
             raise CoinError(f"redemption refused: {why}")
@@ -167,11 +252,28 @@ class RedemptionRegistry:
             prior = self.redeemed[serial]
             raise CoinError(f"already redeemed at {prior['ts']} — copied/replayed QR")
         credit = int(cred["credit_cents"])
+        # 1) commit single-use FIRST and persist — the coin is now durably spent
         rec = {"serial": serial, "to": redeemer_account, "credit_cents": credit, "ts": ts}
         self.redeemed[serial] = rec
         self.credits[redeemer_account] = self.credits.get(redeemer_account, 0) + credit
         self._emit("REDEEM", rec, ts)
-        return rec
+        self._persist()
+        # 2) then post the actual credit; failure leaves it 'pending' for retry,
+        #    never a double-credit (the spend is already committed)
+        posting = self._post_credit(serial, redeemer_account, credit, ts)
+        self._persist()
+        return {**rec, "credit_status": posting["status"], "credit_ref": posting.get("ref")}
+
+    def retry_pending(self, ts: str) -> int:
+        """Re-post any credits that didn't land (backend was down). Safe to call
+        repeatedly — only 'pending' serials are retried. Returns how many posted."""
+        posted = 0
+        for serial, p in list(self.postings.items()):
+            if p.get("status") == "pending":
+                np = self._post_credit(serial, p["account"], p["cents"], ts)
+                posted += 1 if np["status"] == "posted" else 0
+        self._persist()
+        return posted
 
     def status(self, serial: str) -> str:
         return "REDEEMED" if serial in self.redeemed else "VALID"
@@ -180,7 +282,7 @@ class RedemptionRegistry:
         return {"validator": self.validator.public(),
                 "trusted_issuer_pubkey": self.trusted_issuer_pubkey,
                 "redeemed": self.redeemed, "credits": self.credits,
-                "events": self.events}
+                "events": self.events, "postings": self.postings}
 
 
 def verify_registry(reg: dict) -> tuple[bool, list[str]]:
