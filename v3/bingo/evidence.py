@@ -57,7 +57,19 @@ def verify(evidence: dict, expected_pubkey_hex: str | None = None) -> tuple[bool
     """Independently verify a persisted chain. Returns (ok, notes).
     Uses the pubkey embedded in JOB_ACCEPTED unless one is passed; if both are
     present they must match. Checks: hash-link continuity, per-event hash
-    integrity, and ed25519 signature under the node's key."""
+    integrity, and ed25519 signature under the node's key.
+
+    Fails CLOSED on any malformed/adversarial document: a third party (and the
+    shipped `python -m bingo.verify` directory scan) runs this on untrusted JSON,
+    so a missing field or wrong type is a rejection, not an exception that aborts
+    the batch."""
+    try:
+        return _verify(evidence, expected_pubkey_hex)
+    except Exception as e:
+        return False, [f"malformed evidence document: {type(e).__name__}: {e}"]
+
+
+def _verify(evidence: dict, expected_pubkey_hex: str | None = None) -> tuple[bool, list[str]]:
     notes: list[str] = []
     events = evidence.get("events", [])
     if not events:

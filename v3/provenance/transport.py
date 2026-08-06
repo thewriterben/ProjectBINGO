@@ -173,7 +173,18 @@ def verify_transport(pp: dict) -> tuple[bool, list[str]]:
     """Verify the custody chain from the document alone. The load-bearing check
     is identity binding: PICKUP and DELIVERY must be signed by the carrier bound
     at BOOKING. If they aren't, that's a re-brokered load and it's rejected —
-    which is what stops the money."""
+    which is what stops the money.
+
+    Fails CLOSED on any malformed/adversarial document (this is the sole settlement
+    gate, run on untrusted JSON): a missing field or wrong type is a rejection, not
+    a crash — and a doc this returns True for must be safe for escrow_decision."""
+    try:
+        return _verify_transport(pp)
+    except Exception as e:
+        return False, [f"malformed transport document: {type(e).__name__}: {e}"]
+
+
+def _verify_transport(pp: dict) -> tuple[bool, list[str]]:
     notes: list[str] = []
     events = pp.get("events", [])
     signers = pp.get("signers", {})
@@ -242,8 +253,13 @@ def verify_transport(pp: dict) -> tuple[bool, list[str]]:
             # a condition report must be a real object — a JSON null slips past the
             # round-3 acceptance==delivery equality check (None == None) and then
             # crashes escrow_decision's damage_delta on a doc the verifier blessed
-            if not isinstance(ev["data"].get("condition"), dict):
+            _cond = ev["data"].get("condition")
+            if not isinstance(_cond, dict):
                 return False, notes + [f"event {ev['seq']}: {t} condition missing/invalid"]
+            # damage must be a list — escrow_decision's damage_delta iterates it;
+            # a non-list (e.g. an int) verifies here then crashes settlement
+            if not isinstance(_cond.get("damage", []), list):
+                return False, notes + [f"event {ev['seq']}: {t} condition 'damage' must be a list"]
         if t == "PICKUP":
             saw_pickup = True
         if t == "DELIVERY":

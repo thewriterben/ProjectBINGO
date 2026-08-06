@@ -349,7 +349,18 @@ class RedemptionRegistry:
 
 def verify_registry(reg: dict) -> tuple[bool, list[str]]:
     """Independently replay the redemption ledger: every event validator-signed,
-    hash-chained, no serial redeemed twice, credits equal the sum of redemptions."""
+    hash-chained, no serial redeemed twice, credits equal the sum of redemptions.
+
+    Fails CLOSED on any malformed/adversarial document: the auditor is contracted
+    to return (ok, notes) for ANY input (and _load turns a False into a refusal to
+    load), so a missing field or wrong type is a rejection, never a crash."""
+    try:
+        return _verify_registry(reg)
+    except Exception as e:
+        return False, [f"malformed redemption ledger: {type(e).__name__}: {e}"]
+
+
+def _verify_registry(reg: dict) -> tuple[bool, list[str]]:
     from bingo import crypto
     notes: list[str] = []
     vpub = (reg.get("validator") or {}).get("pubkey")

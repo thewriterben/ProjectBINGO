@@ -257,7 +257,19 @@ def verify_machine_share(doc: dict) -> tuple[bool, list[str]]:
     every event's signature + hash-chain link under its registered signer, no
     oversubscription, and every EARN's distribution recomputed and checked
     (pro-rata correct, conserves to the cent, cap never exceeded). Returns
-    (ok, notes)."""
+    (ok, notes).
+
+    Fails CLOSED on any malformed/adversarial document: a funding portal runs this
+    as the gate on an UNTRUSTED offering, and the verify-gated render paths
+    (term_sheet/readiness_report/disclosure_inputs) only expect a clean (ok, notes)
+    — so a missing field or mistyped economic term is a rejection, never a crash."""
+    try:
+        return _verify_machine_share(doc)
+    except Exception as e:
+        return False, [f"malformed machine-share document: {type(e).__name__}: {e}"]
+
+
+def _verify_machine_share(doc: dict) -> tuple[bool, list[str]]:
     notes: list[str] = []
     events = doc.get("events", [])
     holders = doc.get("holders", {})
@@ -275,6 +287,13 @@ def verify_machine_share(doc: dict) -> tuple[bool, list[str]]:
     bps = od.get("investor_share_bps")
     cap = od.get("repayment_cap_cents")
     price = od.get("price_cents")
+    # the signed economic terms must be well-typed integers — otherwise the gate
+    # can "verify" a signed-but-nonsense offering (e.g. total_shares="100") that
+    # then crashes every verify-gated render (_terms computes total*price, cap/…)
+    if not all(isinstance(v, int) for v in (total, bps, cap, price)):
+        return False, ["OPEN economic terms must be integers"]
+    if total <= 0 or price < 0 or cap < 0 or not (0 < bps <= 10_000):
+        return False, ["OPEN economic terms out of range"]
     holdings: dict[str, int] = {}
     cumulative = 0            # cumulative paid to investors
     cumulative_revenue = 0    # cumulative machine revenue seen

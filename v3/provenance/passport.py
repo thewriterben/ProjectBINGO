@@ -183,7 +183,18 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
     and (4) that the signer is a known actor. Then confirms the recorded
     settlement conserves the sale price to the cent. Needs no rancher, no
     processor, no server online — just the passport and this function.
+
+    Fails CLOSED on any malformed/adversarial document: the verifier is contracted
+    to return (ok, notes) for ANY input (a buyer's script / CI / the CLI runs it on
+    untrusted JSON), so a missing field or wrong type is a rejection, not a crash.
     """
+    try:
+        return _verify_passport(passport)
+    except Exception as e:
+        return False, [f"malformed passport document: {type(e).__name__}: {e}"]
+
+
+def _verify_passport(passport: dict) -> tuple[bool, list[str]]:
     notes: list[str] = []
     events = passport.get("events", [])
     signers = passport.get("signers", {})
@@ -220,6 +231,13 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
     if commit != sha256_hex(canonical_json(passport.get("subject", {}))):
         return False, notes + ["subject doesn't match the signed genesis commitment "
                                "(product/lot/weight relabeled)"]
+
+    # the advertised chain_head is the passport's content-address (tokens pin to
+    # it) — it MUST equal the real head, or a cheap passport can masquerade as a
+    # premium one by copying its head, and a token's provenance pin is defeated.
+    if passport.get("chain_head", events[-1]["hash"]) != events[-1]["hash"]:
+        return False, notes + ["top-level chain_head != actual chain head "
+                               "(provenance substitution)"]
 
     # settlement conservation — check EVERY SALE, not just the first. Each signed,
     # hash-chained SALE link must INDEPENDENTLY conserve to the cent and match its
@@ -267,6 +285,12 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
             return False, notes + ["top-level settlement doesn't match the signed SALE legs"]
         notes.append(f"{len(sales)} SALE(s) conserve to the cent and match their "
                      f"declared splits")
+    elif passport.get("settlement"):
+        # no SALE was recorded, so there is nothing to pay — a non-empty top-level
+        # settlement is injected payout legs downstream code (earnings rollups,
+        # certificates) would otherwise treat as authoritative money movement
+        return False, notes + ["top-level settlement present with no SALE event "
+                               "(injected payout legs)"]
 
     notes.append(f"{len(events)} links, {len(signers)} signer(s): "
                  f"{' -> '.join(roles_seen)}")

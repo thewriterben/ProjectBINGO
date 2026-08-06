@@ -62,16 +62,24 @@ def _recipient(to) -> tuple:
     return to, None
 
 
-def _bind_recipient(acct_key: dict, d: dict) -> tuple:
+def _bind_recipient(acct_key: dict, terminal: set, d: dict) -> tuple:
     """Bind the recipient account of a TRANSFER/SALE to the key named in the
-    signed event (if any). Reject if the account is already bound to a DIFFERENT
-    key — an account has one controlling key for its whole life."""
+    signed event (if any). An account's controlling key is fixed at its FIRST
+    credit: a first keyless credit makes it TERMINAL (permanently un-spendable),
+    and a later credit can neither rebind a bound account to a different key nor
+    attach a key to a terminal account (which would let a third party capture and
+    sweep 'frozen' shares)."""
+    to = d["to"]
     tp = d.get("to_pubkey")
     if tp:
-        prior = acct_key.get(d["to"])
+        if to in terminal:
+            return False, "cannot bind a key to a terminal (keyless) account"
+        prior = acct_key.get(to)
         if prior is not None and prior != tp:
             return False, "recipient account bound to a different key"
-        acct_key[d["to"]] = tp
+        acct_key[to] = tp
+    elif to not in acct_key:
+        terminal.add(to)                 # first credit is keyless -> terminal for life
     return True, ""
 
 
@@ -355,6 +363,7 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
     # and sweep the shares. An account credited with no bound key is terminal
     # (holdable, never spendable).
     acct_key: dict[str, str] = {}
+    terminal: set = set()                   # accounts first credited with no key (un-spendable)
     retired = 0
     prev = ZERO
     signed_head = None                     # the passport_head from the SIGNED ISSUE event
@@ -416,6 +425,11 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
             fulfiller = d.get("fulfiller")
             signed_head = d["passport_head"]
         elif t == "TRANSFER":
+            # shares must be a positive int — a NEGATIVE transfer would run the
+            # balance math backwards (credit the sender, debit the recipient),
+            # draining a victim account with only the attacker's signature
+            if not isinstance(d.get("shares"), int) or d["shares"] <= 0:
+                return False, notes + [f"event {ev['seq']}: shares must be a positive integer"]
             # only the owner can move their own shares — the signer's KEY must be
             # the one bound to the 'from' account (not merely a holder record that
             # claims that account string with an arbitrary key)
@@ -426,12 +440,14 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
                                        f"controlled by the signer's key"]
             if bal.get(d["from"], 0) < d["shares"]:
                 return False, notes + [f"event {ev['seq']}: overdraft (double-spend) blocked"]
-            ok_bind, why = _bind_recipient(acct_key, d)
+            ok_bind, why = _bind_recipient(acct_key, terminal, d)
             if not ok_bind:
                 return False, notes + [f"event {ev['seq']}: {why}"]
             bal[d["from"]] -= d["shares"]
             bal[d["to"]] = bal.get(d["to"], 0) + d["shares"]
         elif t == "REDEEM":
+            if not isinstance(d.get("shares"), int) or d["shares"] <= 0:
+                return False, notes + [f"event {ev['seq']}: shares must be a positive integer"]
             if d["account"] != rec["account"]:
                 return False, notes + [f"event {ev['seq']}: redeem signer != account"]
             if acct_key.get(d["account"]) != rec["pubkey"]:
@@ -458,6 +474,8 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
             retired += d["shares"]
         elif t == "SALE":
             # a priced transfer: authorize + move shares like a transfer...
+            if not isinstance(d.get("shares"), int) or d["shares"] <= 0:
+                return False, notes + [f"event {ev['seq']}: shares must be a positive integer"]
             if d["from"] != rec["account"]:
                 return False, notes + [f"event {ev['seq']}: signer is not the 'from' owner"]
             if acct_key.get(d["from"]) != rec["pubkey"]:
@@ -484,7 +502,7 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
                 return False, notes + [f"event {ev['seq']}: negative payout leg"]
             if sum(l["cents"] for l in d.get("legs", [])) != d["price_cents"]:
                 return False, notes + [f"event {ev['seq']}: sale proceeds not conserved"]
-            ok_bind, why = _bind_recipient(acct_key, d)
+            ok_bind, why = _bind_recipient(acct_key, terminal, d)
             if not ok_bind:
                 return False, notes + [f"event {ev['seq']}: {why}"]
             bal[d["from"]] -= d["shares"]
