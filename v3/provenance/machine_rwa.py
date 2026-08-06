@@ -22,11 +22,17 @@ Same kernel as the rest of BINGO:
   * **single-use earnings** — each machine-revenue event settles once; a replayed
     event_ref is rejected, so revenue can't be double-distributed
 
-NOT financial or legal advice, and NOT a securities offering. Machine revenue
-shares ARE securities in the US (VISION is explicit); a real raise ships through
-the compliant path (Reg CF / registered transfer agent / KYC'd investors). This
-is the technical primitive underneath — who put in what, and what the verified
-machine actually paid back — nothing more.
+SECURITIES NOTE (interim wording; not legal advice — see SECURITIES.md at the
+repo root). A machine revenue-share IS a security in the US: an investment of
+money in a common enterprise, for profit (the repayment cap), from the operator's
+efforts (Howey), and note-like under Reves. This module is only the primitive
+underneath — it records who put in what and what the PoF-verified machine
+actually paid back. It does NOT offer, solicit, or sell shares, and this docstring
+is not a legal conclusion about any offering. A real raise must ship through a
+compliant offering — e.g. Reg CF via a registered funding portal, or Reg D 506(c)
+to verified-accredited investors — with the required disclosures, KYC/AML,
+transfer restrictions, and (for secondary sales) transfer-agent / trading-venue
+rules. Get securities counsel before dollar one.
 """
 
 from __future__ import annotations

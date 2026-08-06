@@ -16,10 +16,20 @@ signature checks under its signer's registered key, no transfer ever overdraws,
 and supply is conserved to the share. Double-spend is caught by replay, not
 trust.
 
-NOT financial or legal advice, and NOT a securities offering. This is a
-technical ownership-and-provenance primitive; a real issuance needs proper
-legal structuring and disclosures. It tracks who holds a claim and proves what
-backs it — nothing more.
+SECURITIES NOTE (interim wording; not legal advice — see SECURITIES.md at the
+repo root). This module is software: it records ownership and provenance. It does
+not itself offer, solicit, or sell anything. Whether a token built on it is a
+security depends on WHAT the token represents and HOW it is sold:
+  * a claim redeemed for a specific physical good by the buyer who wants that
+    good (consumptive) is likely NOT a security — but may still be subject to
+    warehouse-receipt (UCC Art. 7), money-transmitter / prepaid-access, and
+    consumer-protection law;
+  * a fractional, freely-tradable, resale-royalty-bearing claim marketed for its
+    return is likely a SECURITIES offering under Howey, requiring registration
+    or an exemption.
+The resale-royalty and secondary-SALE features below make the second case easy
+to reach, so do NOT treat the "primitive" framing as a blanket exemption. Get
+securities counsel before conducting any raise.
 """
 
 from __future__ import annotations
