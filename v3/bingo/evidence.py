@@ -103,6 +103,13 @@ def verify(evidence: dict, expected_pubkey_hex: str | None = None) -> tuple[bool
             if k in jd and evidence.get(k) != jd[k]:
                 return False, notes + [f"top-level {k} != signed JOB_ACCEPTED "
                                        f"(job identity forged/relabeled)"]
+        # the chain must actually EVIDENCE the signed quantity — a chain truncated
+        # short of its units (or with none at all) would otherwise settle in full
+        # for work never done (proof-of-fabrication soundness / conservation)
+        completed = sum(1 for e in events if e["type"] == "UNIT_COMPLETE")
+        if "qty" in jd and completed != jd["qty"]:
+            return False, notes + [f"unit evidence incomplete: {completed} "
+                                   f"UNIT_COMPLETE event(s) for a signed qty of {jd['qty']}"]
     else:
         return False, notes + ["no signed job identity (JOB_ACCEPTED with bound "
                                "job_id) — cannot attribute this chain to a job"]

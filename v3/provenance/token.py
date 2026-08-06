@@ -54,6 +54,27 @@ def _payees(value_split) -> list:
     return [dict(p) for p in value_split]
 
 
+def _recipient(to) -> tuple:
+    """Normalize a transfer/sale recipient into (account, pubkey_hex_or_None).
+    An Actor binds account->key (spendable later); a bare string is terminal."""
+    if hasattr(to, "account") and hasattr(to, "pubkey_hex"):
+        return to.account, to.pubkey_hex
+    return to, None
+
+
+def _bind_recipient(acct_key: dict, d: dict) -> tuple:
+    """Bind the recipient account of a TRANSFER/SALE to the key named in the
+    signed event (if any). Reject if the account is already bound to a DIFFERENT
+    key — an account has one controlling key for its whole life."""
+    tp = d.get("to_pubkey")
+    if tp:
+        prior = acct_key.get(d["to"])
+        if prior is not None and prior != tp:
+            return False, "recipient account bound to a different key"
+        acct_key[d["to"]] = tp
+    return True, ""
+
+
 def route(amount_cents: int, payees: list) -> list:
     """Split an amount across payees by bps. Integer-floor; residue -> first
     payee, so cents are conserved exactly (same rule as bingo.settlement).
@@ -182,28 +203,40 @@ class AssetToken:
         self.events.append(ev)
         return ev
 
-    def transfer(self, sender: Actor, to_account: str, shares: int,
+    def transfer(self, sender: Actor, to, shares: int,
                  ts: str | None = None):
-        """Move `shares` from the sender to `to_account`. Only the current
-        owner can authorize it (the ledger records the sender's signature),
-        and only up to what they actually hold."""
+        """Move `shares` from the sender to a recipient. Only the current owner
+        can authorize it (the ledger records the sender's signature), and only up
+        to what they actually hold.
+
+        `to` may be an Actor (preferred) or a bare account string. Passing an
+        Actor binds the recipient ACCOUNT to their PUBLIC KEY inside the signed
+        event — so later only that key can move those shares. A bare string is a
+        terminal credit (the recipient can hold but can never spend, because no
+        key was bound to the account)."""
+        to_account, to_pubkey = _recipient(to)
         if shares <= 0:
             raise TokenError("shares must be positive")
         if self.balances.get(sender.account, 0) < shares:
             raise TokenError(f"insufficient balance: {sender.account} holds "
                              f"{self.balances.get(sender.account, 0)}, needs {shares}")
         self._emit(sender, "TRANSFER",
-                   {"from": sender.account, "to": to_account, "shares": shares}, ts=ts)
+                   {"from": sender.account, "to": to_account,
+                    "to_pubkey": to_pubkey, "shares": shares}, ts=ts)
         self.balances[sender.account] -= shares
         self.balances[to_account] = self.balances.get(to_account, 0) + shares
         return self.balances
 
-    def sell(self, seller: Actor, buyer_account: str, shares: int,
+    def sell(self, seller: Actor, buyer, shares: int,
              price_cents: int, resale_royalty_bps: int = 0, ts: str | None = None):
         """A PRICED transfer: moves shares AND settles the proceeds. If the
         issuer is selling, all proceeds route through the provenance split (the
         rancher gets paid when the claim is first sold). On a resale, the seller
-        is paid, minus a royalty that routes back through the split."""
+        is paid, minus a royalty that routes back through the split.
+
+        `buyer` may be an Actor (preferred — binds the account to the buyer's key
+        so only they can resell) or a bare account string (terminal credit)."""
+        buyer_account, buyer_pubkey = _recipient(buyer)
         if shares <= 0 or price_cents < 0:
             raise TokenError("shares must be positive and price non-negative")
         if self.balances.get(seller.account, 0) < shares:
@@ -217,8 +250,8 @@ class AssetToken:
         legs = _sale_legs(price_cents, primary, resale_royalty_bps,
                           seller.account, self.value_split)
         self._emit(seller, "SALE", {
-            "from": seller.account, "to": buyer_account, "shares": shares,
-            "price_cents": price_cents, "primary": primary,
+            "from": seller.account, "to": buyer_account, "to_pubkey": buyer_pubkey,
+            "shares": shares, "price_cents": price_cents, "primary": primary,
             "royalty_bps": (0 if primary else resale_royalty_bps), "legs": legs}, ts=ts)
         self.balances[seller.account] -= shares
         self.balances[buyer_account] = self.balances.get(buyer_account, 0) + shares
@@ -315,6 +348,13 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
     supply = token.get("total_supply", 0)
     fulfiller = None                       # the fulfiller from the SIGNED ISSUE (set below)
     bal: dict[str, int] = {}
+    # account -> the pubkey bound to it AT CREDIT (ISSUE 'to' = issuer; a
+    # TRANSFER/SALE that names the recipient's key). A debit (from/redeem) is
+    # authorized only if the signer's key is the one bound to that account — so a
+    # holder record can't just claim a victim's account string with its own key
+    # and sweep the shares. An account credited with no bound key is terminal
+    # (holdable, never spendable).
+    acct_key: dict[str, str] = {}
     retired = 0
     prev = ZERO
     signed_head = None                     # the passport_head from the SIGNED ISSUE event
@@ -346,6 +386,7 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
             if who != token.get("issuer"):
                 return False, notes + ["ISSUE not signed by the issuer"]
             bal[d["to"]] = bal.get(d["to"], 0) + d["shares"]
+            acct_key[d["to"]] = rec["pubkey"]   # issuer's account bound to its key
             if d["shares"] != supply:
                 return False, notes + ["ISSUE shares != total_supply"]
             # token_id must be the hash of the SIGNED manifest, and the top-level
@@ -375,16 +416,27 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
             fulfiller = d.get("fulfiller")
             signed_head = d["passport_head"]
         elif t == "TRANSFER":
-            # only the owner can move their own shares
+            # only the owner can move their own shares — the signer's KEY must be
+            # the one bound to the 'from' account (not merely a holder record that
+            # claims that account string with an arbitrary key)
             if d["from"] != rec["account"]:
                 return False, notes + [f"event {ev['seq']}: signer is not the 'from' owner"]
+            if acct_key.get(d["from"]) != rec["pubkey"]:
+                return False, notes + [f"event {ev['seq']}: 'from' account is not "
+                                       f"controlled by the signer's key"]
             if bal.get(d["from"], 0) < d["shares"]:
                 return False, notes + [f"event {ev['seq']}: overdraft (double-spend) blocked"]
+            ok_bind, why = _bind_recipient(acct_key, d)
+            if not ok_bind:
+                return False, notes + [f"event {ev['seq']}: {why}"]
             bal[d["from"]] -= d["shares"]
             bal[d["to"]] = bal.get(d["to"], 0) + d["shares"]
         elif t == "REDEEM":
             if d["account"] != rec["account"]:
                 return False, notes + [f"event {ev['seq']}: redeem signer != account"]
+            if acct_key.get(d["account"]) != rec["pubkey"]:
+                return False, notes + [f"event {ev['seq']}: redeem account is not "
+                                       f"controlled by the signer's key"]
             if bal.get(d["account"], 0) < d["shares"]:
                 return False, notes + [f"event {ev['seq']}: redeem overdraft"]
             if fulfiller:
@@ -408,6 +460,9 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
             # a priced transfer: authorize + move shares like a transfer...
             if d["from"] != rec["account"]:
                 return False, notes + [f"event {ev['seq']}: signer is not the 'from' owner"]
+            if acct_key.get(d["from"]) != rec["pubkey"]:
+                return False, notes + [f"event {ev['seq']}: 'from' account is not "
+                                       f"controlled by the signer's key"]
             if bal.get(d["from"], 0) < d["shares"]:
                 return False, notes + [f"event {ev['seq']}: overdraft (double-spend) blocked"]
             # ...then re-derive the settlement and reject fabricated payouts
@@ -429,6 +484,9 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
                 return False, notes + [f"event {ev['seq']}: negative payout leg"]
             if sum(l["cents"] for l in d.get("legs", [])) != d["price_cents"]:
                 return False, notes + [f"event {ev['seq']}: sale proceeds not conserved"]
+            ok_bind, why = _bind_recipient(acct_key, d)
+            if not ok_bind:
+                return False, notes + [f"event {ev['seq']}: {why}"]
             bal[d["from"]] -= d["shares"]
             bal[d["to"]] = bal.get(d["to"], 0) + d["shares"]
         else:

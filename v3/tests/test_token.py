@@ -35,9 +35,9 @@ def main() -> int:
     pp, op, a, b, tok = fresh()
 
     # happy path: distribute, secondary transfer, redeem
-    tok.transfer(op, a.account, 40, ts="t1")
-    tok.transfer(op, b.account, 25, ts="t2")
-    tok.transfer(b, a.account, 10, ts="t3")
+    tok.transfer(op, a, 40, ts="t1")            # Actor recipient binds account->key
+    tok.transfer(op, b, 25, ts="t2")
+    tok.transfer(b, a, 10, ts="t3")
     tok.redeem(a, 15, note="served", ts="t4")
     td = tok.to_dict()
     assert td["balances"] == {"acct:op": 35, "acct:a": 35, "acct:b": 15}, td["balances"]
@@ -120,7 +120,7 @@ def main() -> int:
     tok9 = AssetToken(backing_asset_id=asset9.asset_id, passport_head=pp9["chain_head"],
                       unit="1/100", total_supply=100, issuer=op9,
                       value_split=vsplit, ts="t0")
-    tok9.sell(op9, a9.account, 40, price_cents=4000, ts="t1")             # primary
+    tok9.sell(op9, a9, 40, price_cents=4000, ts="t1")             # primary (Actor binds key)
     tok9.sell(a9, b9.account, 10, price_cents=1000, resale_royalty_bps=500, ts="t2")  # resale
     td9 = tok9.to_dict()
     ok, why = verify_token(td9, backing_passport=pp9)

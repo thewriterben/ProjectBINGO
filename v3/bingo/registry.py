@@ -78,7 +78,12 @@ class AssetRegistry:
                       license=license, split=split, derives_from=derives_from)
         asset.effective_split = self._compose_split(split, derives_from)
         asset.effective_split.validate()
-        asset.asset_id = sha256_hex(canonical_json(asset.manifest()))
+        # the asset_id is CONTENT-addressed — same content/split/license => same id.
+        # registered_at is wall-clock metadata, not identity; folding it in made the
+        # id time-dependent (violating "same provenance yields the same asset_id"
+        # and flaking content-addressing). Hash the manifest WITHOUT it.
+        ident = {k: v for k, v in asset.manifest().items() if k != "registered_at"}
+        asset.asset_id = sha256_hex(canonical_json(ident))
         self._assets[asset.asset_id] = asset
         self._blobs[content_hash] = content
         return asset

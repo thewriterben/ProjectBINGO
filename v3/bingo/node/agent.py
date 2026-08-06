@@ -69,6 +69,11 @@ class NodeAgent:
             if "royalty_assets" in ja.data and \
                     [l.asset_id for l in job.royalty_lines] != ja.data["royalty_assets"]:
                 return False
+            # the settlement gate must confirm the signed quantity was actually
+            # produced — else a node that yields zero units is paid in full
+            completed = sum(1 for e in job.evidence if e.type == "UNIT_COMPLETE")
+            if "qty" in ja.data and completed != ja.data["qty"]:
+                return False
         return True
 
     # -- job lifecycle -----------------------------------------------------------

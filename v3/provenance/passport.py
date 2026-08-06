@@ -221,9 +221,12 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
         return False, notes + ["subject doesn't match the signed genesis commitment "
                                "(product/lot/weight relabeled)"]
 
-    # settlement conservation, if a sale was recorded
-    sale = next((e for e in events if e["type"] == "SALE"), None)
-    if sale:
+    # settlement conservation — check EVERY SALE, not just the first. Each signed,
+    # hash-chained SALE link must INDEPENDENTLY conserve to the cent and match its
+    # declared split; otherwise a second signed SALE can pay out far more than its
+    # price (value created from nothing) while the first one looks honest.
+    sales = [e for e in events if e["type"] == "SALE"]
+    for sale in sales:
         price = sale["data"]["price_cents"]
         # conserve against the SIGNED legs inside the SALE event — NOT the
         # unsigned top-level `settlement` field, which an attacker can rewrite to
@@ -231,19 +234,17 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
         signed_legs = sale["data"].get("legs", [])
         paid = sum(l["cents"] for l in signed_legs)
         if paid != price:
-            return False, notes + [f"settlement {paid}¢ != sale price {price}¢"]
+            return False, notes + [f"SALE seq {sale['seq']}: settlement {paid}¢ != price {price}¢"]
         # the legs must MATCH the declared split — not merely conserve the total.
-        # Otherwise a self-dealing seller signs legs paying themselves 100% while
-        # the certificate's `split` advertises the rancher's cut (the money and the
-        # displayed split disagree). Re-derive from the signed split and compare.
         split_payees = (sale["data"].get("split") or {}).get("payees", [])
-        # the split must actually allocate 100% — otherwise the integer-floor
-        # residue rule (meant only for rounding cents) silently dumps the entire
-        # unallocated shortfall onto the first payee while the per-payee bps read
-        # as an honest split (self-dealing under an even-looking certificate).
+        # each payee's bps must be strictly positive (Split.validate's rule, which a
+        # hand-crafted SALE bypasses) AND the split must allocate 100% — else a
+        # negative bps pays one account >100% while another takes an impossible
+        # negative debit, or the residue rule misroutes an under-allocated shortfall.
+        if split_payees and any(p["bps"] <= 0 for p in split_payees):
+            return False, notes + [f"SALE seq {sale['seq']}: split has a non-positive bps"]
         if split_payees and sum(p["bps"] for p in split_payees) != 10_000:
-            return False, notes + ["SALE split bps don't sum to 10000 "
-                                   "(shortfall would misroute to the first payee)"]
+            return False, notes + [f"SALE seq {sale['seq']}: split bps don't sum to 10000"]
         exp, dist = [], 0
         for p in split_payees:
             amt = (price * p["bps"]) // 10_000
@@ -257,13 +258,15 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
         for l in exp:
             agg_exp[l["account"]] = agg_exp.get(l["account"], 0) + l["cents"]
         if agg_legs != agg_exp:
-            return False, notes + ["SALE legs don't match the declared split "
-                                   "(money routed differently than the certificate shows)"]
-        # if a top-level settlement is present it must equal the signed legs
-        if passport.get("settlement", signed_legs) != signed_legs:
+            return False, notes + [f"SALE seq {sale['seq']}: legs don't match the "
+                                   f"declared split (money routed differently than shown)"]
+    if sales:
+        # the unsigned top-level settlement mirror must equal the LATEST sale's legs
+        last_legs = sales[-1]["data"].get("legs", [])
+        if passport.get("settlement", last_legs) != last_legs:
             return False, notes + ["top-level settlement doesn't match the signed SALE legs"]
-        notes.append(f"settlement conserves {price}¢ across {len(signed_legs)} signed payees "
-                     f"matching the declared split")
+        notes.append(f"{len(sales)} SALE(s) conserve to the cent and match their "
+                     f"declared splits")
 
     notes.append(f"{len(events)} links, {len(signers)} signer(s): "
                  f"{' -> '.join(roles_seen)}")

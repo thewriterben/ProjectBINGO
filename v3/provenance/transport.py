@@ -201,6 +201,16 @@ def verify_transport(pp: dict) -> tuple[bool, list[str]]:
         if esc.get("amount_cents") != bd.get("price_cents") or \
            esc.get("carrier_cents") != bd.get("carrier_cents"):
             return False, ["top-level escrow != signed BOOKING amounts"]
+    # the escrow amounts must themselves be sane — book() enforces
+    # 0 <= carrier_cents <= price_cents, but the document verifier is the sole
+    # settlement gate and must re-enforce it, or a (colluding/compromised) broker
+    # signs carrier_cents > price_cents and escrow_decision over-releases,
+    # creating value and driving the broker fee negative.
+    _price, _carrier = bd.get("price_cents", 0), bd.get("carrier_cents", 0)
+    if not isinstance(_price, int) or not isinstance(_carrier, int) or \
+            _price < 0 or _carrier < 0 or _carrier > _price:
+        return False, ["signed BOOKING escrow amounts out of range "
+                       "(carrier_cents must be 0..price_cents)"]
 
     prev = ZERO
     saw_pickup = saw_delivery = False
@@ -228,6 +238,12 @@ def verify_transport(pp: dict) -> tuple[bool, list[str]]:
                 return False, notes + [
                     f"event {ev['seq']}: {t} signed by '{rec.get('name', who)}', "
                     f"NOT the carrier bound at booking — double brokering detected"]
+        if t in ("PICKUP", "DELIVERY"):
+            # a condition report must be a real object — a JSON null slips past the
+            # round-3 acceptance==delivery equality check (None == None) and then
+            # crashes escrow_decision's damage_delta on a doc the verifier blessed
+            if not isinstance(ev["data"].get("condition"), dict):
+                return False, notes + [f"event {ev['seq']}: {t} condition missing/invalid"]
         if t == "PICKUP":
             saw_pickup = True
         if t == "DELIVERY":

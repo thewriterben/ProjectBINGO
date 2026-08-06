@@ -181,6 +181,8 @@ class MachineShare:
             raise MachineRwaError("only the operator who opened the offering may record earnings")
         if revenue_cents <= 0:
             raise MachineRwaError("revenue_cents must be positive")
+        if not isinstance(event_ref, str):
+            raise MachineRwaError("event_ref must be a string")
         if any(e["type"] == "EARN" and e["data"]["event_ref"] == event_ref
                for e in self.events):
             raise MachineRwaError(f"earning event {event_ref!r} already recorded (double count)")
@@ -319,6 +321,12 @@ def verify_machine_share(doc: dict) -> tuple[bool, list[str]]:
         elif t == "EARN":
             if who != doc.get("operator"):
                 return False, [f"event {ev['seq']}: EARN not signed by the operator"]
+            # event_ref must be a string — a non-hashable (list/dict) in a fully
+            # signed EARN would otherwise raise inside `in seen_refs`, turning the
+            # fail-closed verifier into an unhandled crash (and taking down the
+            # verify-gated raise-readiness render paths with it)
+            if not isinstance(d.get("event_ref"), str):
+                return False, [f"event {ev['seq']}: EARN event_ref must be a string"]
             if d["event_ref"] in seen_refs:
                 return False, [f"event {ev['seq']}: duplicate earning event_ref (double count)"]
             seen_refs.add(d["event_ref"])
