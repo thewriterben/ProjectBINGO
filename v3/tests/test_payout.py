@@ -70,7 +70,7 @@ def main() -> int:
     retried = eng2.retry_pending()
     assert len(retried) == 1 and retried[0].account == "acct:network"
     assert retried[0].status == PAID
-    assert eng2.rail.sent == [payout_key(JOB, 3, "acct:network", 40)]
+    assert eng2.rail.sent == [payout_key(JOB, "acct:network", 40, "network fee (3%)", 0)]
     assert eng2.reconcile_job(JOB, legs)["fully_settled"]
     assert eng2.balance("acct:network") == 40        # paid once, not twice
 
@@ -119,9 +119,14 @@ def main() -> int:
     assert not rhigh["consistent"]
     assert any("not owed" in d for d in rhigh["discrepancies"])
 
-    # -- keys are deterministic (stable across retries) -----------------------
-    assert payout_key(JOB, 0, "acct:a", 100) == payout_key(JOB, 0, "acct:a", 100)
-    assert payout_key(JOB, 0, "acct:a", 100) != payout_key(JOB, 1, "acct:a", 100)
+    # -- keys are deterministic AND order-independent (reorder can't double-pay) --
+    assert payout_key(JOB, "acct:a", 100, "m", 0) == payout_key(JOB, "acct:a", 100, "m", 0)
+    assert payout_key(JOB, "acct:a", 100, "m", 0) != payout_key(JOB, "acct:a", 100, "m", 1)
+    _r = MockRail(); _e = PayoutEngine(_r)
+    _e.pay_legs(legs, order_id=ORDER, job_id=JOB)
+    _sent = len(_r.sent)
+    _e.pay_legs(list(reversed(legs)), order_id=ORDER, job_id=JOB)   # same legs, reordered
+    assert len(_r.sent) == _sent, "reordering identical legs must not re-pay"
 
     # -- end-to-end: a real settled order drives payouts through the engine ----
     from tests.test_earnings import build as build_designs

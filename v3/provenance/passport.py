@@ -207,10 +207,17 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
     sale = next((e for e in events if e["type"] == "SALE"), None)
     if sale:
         price = sale["data"]["price_cents"]
-        paid = sum(l["cents"] for l in passport.get("settlement", []))
+        # conserve against the SIGNED legs inside the SALE event — NOT the
+        # unsigned top-level `settlement` field, which an attacker can rewrite to
+        # reroute the money while keeping the total intact.
+        signed_legs = sale["data"].get("legs", [])
+        paid = sum(l["cents"] for l in signed_legs)
         if paid != price:
             return False, notes + [f"settlement {paid}¢ != sale price {price}¢"]
-        notes.append(f"settlement conserves {price}¢ across {len(passport['settlement'])} payees")
+        # if a top-level settlement is present it must equal the signed legs
+        if passport.get("settlement", signed_legs) != signed_legs:
+            return False, notes + ["top-level settlement doesn't match the signed SALE legs"]
+        notes.append(f"settlement conserves {price}¢ across {len(signed_legs)} signed payees")
 
     notes.append(f"{len(events)} links, {len(signers)} signer(s): "
                  f"{' -> '.join(roles_seen)}")

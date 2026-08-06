@@ -182,6 +182,10 @@ def verify(message: bytes, signature: bytes, pub: bytes) -> bool:
     try:
         R = _decodepoint(signature[:32])
         A = _decodepoint(pub)
+        # reject low-order / identity public keys: [8]A == neutral means A lives
+        # in the small subgroup, under which signatures can be universally forged.
+        if _scalarmult(A, 8) == (0, 1):
+            return False
         S = _decodeint(signature[32:])
         if S >= L:
             return False

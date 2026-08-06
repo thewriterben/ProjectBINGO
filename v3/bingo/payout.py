@@ -42,12 +42,30 @@ PAID = "PAID"
 FAILED = "FAILED"
 
 
-def payout_key(job_id: str, index: int, account: str, amount_cents: int) -> str:
-    """Deterministic idempotency key for one payout leg. Stable across retries
-    (same settlement -> same key), unique per leg (index disambiguates identical
-    account+amount legs)."""
+def payout_key(job_id: str, account: str, amount_cents: int, memo: str,
+               occurrence: int) -> str:
+    """Deterministic idempotency key for one payout leg, bound to its ECONOMIC
+    identity (account, amount, memo) plus an occurrence index that disambiguates
+    genuinely-identical legs. Crucially it does NOT depend on the leg's position
+    in the list, so re-settling the same legs in a different order produces the
+    same set of keys and never double-pays."""
     return sha256_hex(canonical_json(
-        {"job_id": job_id, "i": index, "account": account, "amount": amount_cents}))
+        {"job_id": job_id, "account": account, "amount": amount_cents,
+         "memo": memo, "n": occurrence}))
+
+
+def _leg_keys(job_id: str, legs) -> list:
+    """Keys for `legs`, aligned by position but computed order-independently:
+    identical (account, amount, memo) legs get occurrence 0, 1, 2 … so the same
+    multiset of legs yields the same multiset of keys regardless of order."""
+    seen: dict = {}
+    keys = []
+    for leg in legs:
+        ident = (leg.account, leg.amount_cents, leg.memo)
+        n = seen.get(ident, 0)
+        seen[ident] = n + 1
+        keys.append(payout_key(job_id, leg.account, leg.amount_cents, leg.memo, n))
+    return keys
 
 
 @dataclass
@@ -198,8 +216,7 @@ class PayoutEngine:
         legs (settlement.compute_settlement_legs / SettlementReceipt.legs). Called
         again with the same legs, already-PAID legs are skipped - idempotent."""
         out: list[PayoutRecord] = []
-        for i, leg in enumerate(legs):
-            key = payout_key(job_id, i, leg.account, leg.amount_cents)
+        for key, leg in zip(_leg_keys(job_id, legs), legs):
             existing = self._journal.get(key)
             if existing and existing.status == PAID:
                 out.append(existing)                 # idempotent: never double-pay
@@ -231,8 +248,8 @@ class PayoutEngine:
         payout not owed) are listed - fail-closed: any leakage shows up here.
         """
         expected: dict[str, int] = {}
-        for i, leg in enumerate(legs):
-            expected[payout_key(job_id, i, leg.account, leg.amount_cents)] = leg.amount_cents
+        for key, leg in zip(_leg_keys(job_id, legs), legs):
+            expected[key] = leg.amount_cents
         recs = {k: r for k, r in self._journal.items() if r.job_id == job_id}
 
         discrepancies: list[str] = []

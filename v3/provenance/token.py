@@ -56,7 +56,12 @@ def _payees(value_split) -> list:
 
 def route(amount_cents: int, payees: list) -> list:
     """Split an amount across payees by bps. Integer-floor; residue -> first
-    payee, so cents are conserved exactly (same rule as bingo.settlement)."""
+    payee, so cents are conserved exactly (same rule as bingo.settlement).
+
+    Fails closed: routing a nonzero amount with no payees would silently lose the
+    whole amount, so it raises instead."""
+    if amount_cents and not payees:
+        raise TokenError("cannot route a nonzero amount with no payees (funds would vanish)")
     legs, dist = [], 0
     for p in payees:
         amt = (amount_cents * p["bps"]) // 10_000
@@ -144,6 +149,7 @@ class AssetToken:
         self.holders: dict[str, dict] = {}          # actor_id -> public record
         self.balances: dict[str, int] = {}          # account -> shares
         self.retired = 0
+        self._receipt_used: dict[str, int] = {}   # delivery_ref -> shares redeemed against it
         self.events: list[dict] = []
 
         manifest = {"schema": SCHEMA, "backing_asset_id": backing_asset_id,
@@ -225,6 +231,14 @@ class AssetToken:
             if not _check_receipt(receipt, self.fulfiller, self.token_id, shares):
                 raise TokenError("redemption requires a valid fulfillment receipt "
                                  "co-signed by the fulfiller (physical settlement)")
+            # a signed delivery of N units backs at most N redeemed shares TOTAL,
+            # across all redemptions — not N each time (physical double-spend)
+            ref = receipt["delivery_ref"]
+            used = self._receipt_used.get(ref, 0) + shares
+            if used > receipt["units"]:
+                raise TokenError(f"delivery receipt over-redeemed: {used} > "
+                                 f"{receipt['units']} units attested")
+            self._receipt_used[ref] = used
             data["receipt"] = receipt
         self._emit(holder, "REDEEM", data, ts=ts)
         self.balances[holder.account] -= shares
@@ -295,7 +309,9 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
     bal: dict[str, int] = {}
     retired = 0
     prev = ZERO
+    signed_head = None                     # the passport_head from the SIGNED ISSUE event
     delivery_refs: list[str] = []          # passport anchors to check against backing
+    receipt_used: dict[str, int] = {}      # delivery_ref -> shares already redeemed against it
 
     for ev in events:
         who = ev.get("signer", "")
@@ -324,6 +340,20 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
             bal[d["to"]] = bal.get(d["to"], 0) + d["shares"]
             if d["shares"] != supply:
                 return False, notes + ["ISSUE shares != total_supply"]
+            # token_id must be the hash of the SIGNED manifest, and the top-level
+            # pins must match the signed ISSUE — you can't relabel what a token is
+            # backed by (or launder it onto a premium passport) without breaking
+            # its id or the issuer's signature.
+            manifest = {"schema": SCHEMA, "backing_asset_id": d["backing_asset_id"],
+                        "passport_head": d["passport_head"], "unit": d["unit"],
+                        "total_supply": d["shares"], "issuer": who}
+            if sha256_hex(canonical_json(manifest)) != token.get("token_id"):
+                return False, notes + ["token_id does not match its signed manifest"]
+            if token.get("passport_head") != d["passport_head"]:
+                return False, notes + ["top-level passport_head != signed ISSUE"]
+            if token.get("backing_asset_id") != d["backing_asset_id"]:
+                return False, notes + ["top-level backing_asset_id != signed ISSUE"]
+            signed_head = d["passport_head"]
         elif t == "TRANSFER":
             # only the owner can move their own shares
             if d["from"] != rec["account"]:
@@ -342,7 +372,16 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
                                       token["token_id"], d["shares"]):
                     return False, notes + [f"event {ev['seq']}: redemption not "
                                            f"physically settled (bad/missing receipt)"]
-                delivery_refs.append(d["receipt"]["delivery_ref"])
+                r = d["receipt"]
+                ref = r["delivery_ref"]
+                # one signed delivery of N units can back at most N redeemed
+                # shares IN TOTAL — not N per redemption (physical double-spend)
+                receipt_used[ref] = receipt_used.get(ref, 0) + d["shares"]
+                if receipt_used[ref] > r["units"]:
+                    return False, notes + [f"event {ev['seq']}: delivery receipt "
+                                           f"{ref[:12]}… over-redeemed "
+                                           f"({receipt_used[ref]} > {r['units']} units)"]
+                delivery_refs.append(ref)
             bal[d["account"]] -= d["shares"]
             retired += d["shares"]
         elif t == "SALE":
@@ -373,20 +412,32 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
     if sum(bal.values()) + retired != supply:
         return False, notes + ["supply not conserved"]
 
+    # the DISPLAYED state must match the replay — a doc can't advertise holdings,
+    # a retired count, or a circulating supply it didn't earn on the ledger
+    if "balances" in token and {k: v for k, v in token["balances"].items() if v} != \
+            {k: v for k, v in bal.items() if v}:
+        return False, notes + ["displayed balances don't match the replayed ledger"]
+    if "retired" in token and token["retired"] != retired:
+        return False, notes + ["displayed 'retired' != replayed"]
+    if "circulating" in token and token["circulating"] != supply - retired:
+        return False, notes + ["displayed 'circulating' != supply - retired"]
+
     # optional: the token is only as trustworthy as its backing provenance
     if backing_passport is not None:
         ok, pnotes = verify_passport(backing_passport)
         if not ok:
             return False, notes + ["backing passport does not verify: " + pnotes[-1]]
-        if backing_passport.get("chain_head") != token.get("passport_head"):
+        # pin to the SIGNED head (from the ISSUE event), not the mutable top-level
+        if backing_passport.get("chain_head") != signed_head:
             return False, notes + ["token not pinned to this passport's chain head"]
-        # every physical redemption must anchor to a real signed event in the
-        # provenance chain — a redemption can't claim a delivery that never happened
-        passport_hashes = {e["hash"] for e in backing_passport.get("events", [])}
+        # a physical redemption must anchor to a real signed DELIVERY/CUSTODY
+        # event — not just any event (lineage, husbandry, …) in the chain
+        passport_hashes = {e["hash"] for e in backing_passport.get("events", [])
+                           if e.get("type") == "CUSTODY"}
         for ref in delivery_refs:
             if ref not in passport_hashes:
                 return False, notes + ["redemption not anchored to a delivery "
-                                       "event in the passport"]
+                                       "(CUSTODY) event in the passport"]
         if backing_passport.get("subject", {}):
             notes.append("backed by verified provenance "
                          f"({backing_passport['chain_head'][:12]}…)")

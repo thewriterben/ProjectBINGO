@@ -203,7 +203,11 @@ class RedemptionRegistry:
         self.credits = {k: int(v) for k, v in data.get("credits", {}).items()}
         self.redeemed = {e["data"]["serial"]: e["data"]
                          for e in self.events if e["type"] == "REDEEM"}
-        self.postings = data.get("postings", {})
+        # postings are an unsigned advisory cache; keep only those backed by a
+        # signed redemption, and never let them drive a credit decision (see
+        # _try_post / retry_pending, which key off the SIGNED chain).
+        self.postings = {s: p for s, p in data.get("postings", {}).items()
+                         if s in self.redeemed}
 
     def _persist(self):
         if not self.store_path:
@@ -223,17 +227,33 @@ class RedemptionRegistry:
         self.events.append(ev)
         return ev
 
-    def _post_credit(self, serial: str, account: str, cents: int, ts: str):
-        posting = {"serial": serial, "account": account, "cents": cents,
-                   "status": "posted" if not self.backend else "pending", "ref": None}
+    def _posted_serials(self) -> set:
+        """Serials whose backend credit is durably confirmed — from the SIGNED
+        chain, not the unsigned `postings` cache (which an attacker can edit)."""
+        return {e["data"]["serial"] for e in self.events if e["type"] == "POSTED"}
+
+    def _try_post(self, serial: str, account: str, cents: int, ts: str) -> str:
+        """Credit the backend for a serial — but ONLY against a matching SIGNED
+        redemption, and at most once (guarded by a signed POSTED event). An
+        injected/edited unsigned posting can never cause a credit, and flipping a
+        posting back to 'pending' on disk can never double-credit."""
+        rec = self.redeemed.get(serial)
+        if not rec or rec.get("to") != account or rec.get("credit_cents") != cents:
+            raise CoinError(f"refusing to credit {serial}: no matching signed redemption")
+        if serial in self._posted_serials():
+            return "posted"                               # already durably posted — idempotent
+        status, ref, err = "posted", None, None
         if self.backend:
             try:
                 res = self.backend.credit(account, cents, serial, ts)
-                posting["status"], posting["ref"] = "posted", res.get("ref")
-            except Exception as e:                       # noqa: BLE001 — record, retry later
-                posting["status"], posting["error"] = "pending", str(e)
-        self.postings[serial] = posting
-        return posting
+                ref = res.get("ref")
+            except Exception as e:                        # noqa: BLE001 — record, retry later
+                status, err = "pending", str(e)
+        self.postings[serial] = {"serial": serial, "account": account, "cents": cents,
+                                 "status": status, "ref": ref, "error": err}
+        if status == "posted":
+            self._emit("POSTED", {"serial": serial}, ts)  # tamper-evident: signed into the chain
+        return status
 
     def redeem(self, cred: dict, redeemer_account: str, ts: str,
                secret: str | None = None) -> dict:
@@ -258,20 +278,25 @@ class RedemptionRegistry:
         self.credits[redeemer_account] = self.credits.get(redeemer_account, 0) + credit
         self._emit("REDEEM", rec, ts)
         self._persist()
-        # 2) then post the actual credit; failure leaves it 'pending' for retry,
-        #    never a double-credit (the spend is already committed)
-        posting = self._post_credit(serial, redeemer_account, credit, ts)
+        # 2) then post the actual credit; failure leaves it for retry, never a
+        #    double-credit (the spend is committed, and POSTED is signed)
+        status = self._try_post(serial, redeemer_account, credit, ts)
         self._persist()
-        return {**rec, "credit_status": posting["status"], "credit_ref": posting.get("ref")}
+        return {**rec, "credit_status": status,
+                "credit_ref": self.postings.get(serial, {}).get("ref")}
 
     def retry_pending(self, ts: str) -> int:
         """Re-post any credits that didn't land (backend was down). Safe to call
-        repeatedly — only 'pending' serials are retried. Returns how many posted."""
+        repeatedly: the eligible set is derived from SIGNED redemptions minus
+        SIGNED postings, so a tampered unsigned `postings` status can neither
+        inject a credit nor cause a double-credit. Returns how many posted."""
         posted = 0
-        for serial, p in list(self.postings.items()):
-            if p.get("status") == "pending":
-                np = self._post_credit(serial, p["account"], p["cents"], ts)
-                posted += 1 if np["status"] == "posted" else 0
+        already = self._posted_serials()
+        for serial, rec in list(self.redeemed.items()):
+            if serial in already:
+                continue                                  # signed POSTED exists — never re-credit
+            if self._try_post(serial, rec["to"], rec["credit_cents"], ts) == "posted":
+                posted += 1
         self._persist()
         return posted
 
@@ -294,6 +319,7 @@ def verify_registry(reg: dict) -> tuple[bool, list[str]]:
     if not vpub:
         return False, ["no validator key"]
     seen: set[str] = set()
+    posted_seen: set[str] = set()
     credited: dict[str, int] = {}
     prev = ZERO
     for ev in reg.get("events", []):
@@ -314,6 +340,13 @@ def verify_registry(reg: dict) -> tuple[bool, list[str]]:
                 return False, notes + [f"event {ev['seq']}: serial {s} redeemed twice"]
             seen.add(s)
             credited[ev["data"]["to"]] = credited.get(ev["data"]["to"], 0) + ev["data"]["credit_cents"]
+        elif ev["type"] == "POSTED":
+            s = ev["data"]["serial"]
+            if s not in seen:
+                return False, notes + [f"event {ev['seq']}: POSTED for un-redeemed serial {s}"]
+            if s in posted_seen:
+                return False, notes + [f"event {ev['seq']}: serial {s} posted twice"]
+            posted_seen.add(s)
     if credited != {k: v for k, v in reg.get("credits", {}).items() if v}:
         return False, notes + ["credited totals don't match the ledger"]
     notes.append(f"{len(seen)} coin(s) redeemed, no double-redemption; "

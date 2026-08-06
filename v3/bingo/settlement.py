@@ -45,7 +45,15 @@ def compute_settlement_legs(job: Job) -> list[Leg]:
     """Pure: the exact split of a job's total. Every backend uses this, so
     the money moves the same whether it's a local ledger or a real PSP.
     Each royalty line routes through its OWN asset's split; integer-floor
-    residue per line goes to that line's first payee (deterministic)."""
+    residue per line goes to that line's first payee (deterministic).
+
+    Fails closed (raises SettlementError) on negative inputs or if the legs do
+    not conserve the job total — never an `assert` (which -O would strip, letting
+    corrupted legs be paid out)."""
+    parts = (job.fabrication_cents, job.material_cents, job.energy_cents,
+             job.logistics_cents, job.fee_cents)
+    if any(c < 0 for c in parts):
+        raise SettlementError("negative settlement component — refusing to route")
     legs: list[Leg] = [
         Leg(node_account(job),
             job.fabrication_cents + job.material_cents + job.energy_cents,
@@ -53,6 +61,10 @@ def compute_settlement_legs(job: Job) -> list[Leg]:
         Leg(CARRIER_ACCOUNT, job.logistics_cents, "logistics"),
     ]
     for line in job.royalty_lines:
+        if line.cents < 0:
+            raise SettlementError(f"negative royalty line {line.asset_id[:8]}")
+        if line.cents > 0 and not line.payees:
+            raise SettlementError(f"royalty line {line.asset_id[:8]} has cents but no payees")
         tag = line.asset_id[:8]
         distributed = 0
         line_legs: list[Leg] = []
@@ -62,14 +74,21 @@ def compute_settlement_legs(job: Job) -> list[Leg]:
                 line_legs.append(Leg(p.account, amt, f"royalty {p.bps}bps [{tag}]"))
                 distributed += amt
         residue = line.cents - distributed
-        if line_legs and residue > 0:
-            line_legs[0].amount_cents += residue
+        if residue > 0:
+            # residue must land even when every payee floored to zero (tiny line,
+            # many payees) — otherwise those cents vanish
+            if line_legs:
+                line_legs[0].amount_cents += residue
+            elif line.payees:
+                line_legs.append(Leg(line.payees[0].account, residue,
+                                     f"royalty residue [{tag}]"))
         legs.extend(line_legs)
     legs.append(Leg(NETWORK_ACCOUNT, job.fee_cents, "network fee (3%)"))
 
     total = sum(l.amount_cents for l in legs)
-    assert total == job.job_total_cents, \
-        f"legs {total} != job total {job.job_total_cents}"
+    if total != job.job_total_cents:
+        raise SettlementError(
+            f"legs {total} != job total {job.job_total_cents} — conservation failed")
     return legs
 
 

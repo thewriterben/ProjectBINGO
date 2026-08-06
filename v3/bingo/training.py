@@ -301,6 +301,9 @@ class RoyaltyMeter:
             raise TrainingError(f"usage event {event_id!r} already metered (double count)")
         if not (0 <= training_share_bps <= 10_000):
             raise TrainingError("training_share_bps out of range")
+        if fee_cents < 0:
+            raise TrainingError("fee_cents must be non-negative (a negative fee "
+                                "would drain the royalty pool)")
         self._seen.add(event_id)
         accrued = (fee_cents * training_share_bps) // 10_000
         self._pool[model_version] = self._pool.get(model_version, 0) + accrued

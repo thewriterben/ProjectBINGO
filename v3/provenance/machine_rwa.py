@@ -57,7 +57,8 @@ class MachineRwaError(Exception):
 # ── the distribution rule (pure; shared by earn() and verify) ────────────────
 
 def _distribute(holdings: dict, investor_share_bps: int, revenue_cents: int,
-                cumulative_paid: int, cap_cents: int) -> tuple[list, int, int]:
+                cumulative_paid: int, cap_cents: int,
+                cumulative_revenue_before: int | None = None) -> tuple[list, int, int]:
     """Split one machine-revenue event. Returns (legs, to_investors, to_operator).
 
     The investor pool is `revenue * investor_share_bps`, clamped so cumulative
@@ -67,8 +68,18 @@ def _distribute(holdings: dict, investor_share_bps: int, revenue_cents: int,
     investors — the operator's slice, plus everything after the cap — is the
     operator's. Conserves to the cent."""
     sold = sum(holdings.values())
-    room = max(0, cap_cents - cumulative_paid)
-    investor_pool = min((revenue_cents * investor_share_bps) // 10_000, room)
+    if cumulative_revenue_before is None:
+        # per-event pool (legacy / direct callers): bps of THIS event, capped.
+        room = max(0, cap_cents - cumulative_paid)
+        investor_pool = min((revenue_cents * investor_share_bps) // 10_000, room)
+    else:
+        # cumulative entitlement: investors are owed their bps of ALL revenue to
+        # date (capped) minus what they've already been paid. Fragmenting revenue
+        # into many sub-threshold events can no longer round their share to zero —
+        # the entitlement accrues on the running total, not per event.
+        entitlement = min(((cumulative_revenue_before + revenue_cents) * investor_share_bps)
+                          // 10_000, cap_cents)
+        investor_pool = max(0, entitlement - cumulative_paid)
 
     legs: list[dict] = []
     dist = 0
@@ -163,7 +174,8 @@ class MachineShare:
             raise MachineRwaError(f"earning event {event_ref!r} already recorded (double count)")
         legs, to_inv, to_op = _distribute(
             self.holdings(), self.investor_share_bps, revenue_cents,
-            self.cumulative_paid(), self.repayment_cap_cents)
+            self.cumulative_paid(), self.repayment_cap_cents,
+            cumulative_revenue_before=self._cumulative_revenue())
         data = {"revenue_cents": revenue_cents, "event_ref": event_ref,
                 "to_investors": to_inv, "to_operator": to_op, "legs": legs,
                 "cumulative_after": self.cumulative_paid() + to_inv}
@@ -187,6 +199,9 @@ class MachineShare:
 
     def cumulative_paid(self) -> int:
         return sum(e["data"]["to_investors"] for e in self.events if e["type"] == "EARN")
+
+    def _cumulative_revenue(self) -> int:
+        return sum(e["data"]["revenue_cents"] for e in self.events if e["type"] == "EARN")
 
     def fully_repaid(self) -> bool:
         return self.cumulative_paid() >= self.repayment_cap_cents
@@ -225,12 +240,20 @@ def verify_machine_share(doc: dict) -> tuple[bool, list[str]]:
     if not events:
         return False, ["no events"]
 
-    total = doc.get("total_shares")
-    bps = doc.get("investor_share_bps")
-    cap = doc.get("repayment_cap_cents")
-    price = doc.get("price_cents")
+    # economic terms come from the SIGNED OPEN event, not the mutable top-level
+    # fields — otherwise an attacker rewrites the terms the payouts are checked
+    # against without breaking any signature.
+    open_ev = events[0]
+    if open_ev.get("type") != "OPEN":
+        return False, ["first event must be OPEN"]
+    od = open_ev.get("data", {})
+    total = od.get("total_shares")
+    bps = od.get("investor_share_bps")
+    cap = od.get("repayment_cap_cents")
+    price = od.get("price_cents")
     holdings: dict[str, int] = {}
-    cumulative = 0
+    cumulative = 0            # cumulative paid to investors
+    cumulative_revenue = 0    # cumulative machine revenue seen
     seen_refs: set = set()
     prev = ZERO
 
@@ -257,6 +280,11 @@ def verify_machine_share(doc: dict) -> tuple[bool, list[str]]:
                 return False, ["OPEN must be the first event"]
             if who != doc.get("operator"):
                 return False, ["OPEN not signed by the operator"]
+            # the mutable top-level terms must match the signed OPEN event
+            for k, signed_v in (("total_shares", total), ("investor_share_bps", bps),
+                                ("repayment_cap_cents", cap), ("price_cents", price)):
+                if doc.get(k) != signed_v:
+                    return False, [f"top-level {k} != signed OPEN event"]
         elif t == "BUY":
             if d["shares"] <= 0:
                 return False, [f"event {ev['seq']}: non-positive shares"]
@@ -271,11 +299,13 @@ def verify_machine_share(doc: dict) -> tuple[bool, list[str]]:
             if d["event_ref"] in seen_refs:
                 return False, [f"event {ev['seq']}: duplicate earning event_ref (double count)"]
             seen_refs.add(d["event_ref"])
-            legs, to_inv, to_op = _distribute(holdings, bps, d["revenue_cents"], cumulative, cap)
+            legs, to_inv, to_op = _distribute(holdings, bps, d["revenue_cents"], cumulative,
+                                              cap, cumulative_revenue_before=cumulative_revenue)
             if legs != d["legs"] or to_inv != d["to_investors"] or to_op != d["to_operator"]:
                 return False, [f"event {ev['seq']}: distribution does not match recomputation"]
             if to_inv + to_op != d["revenue_cents"]:
                 return False, [f"event {ev['seq']}: distribution does not conserve"]
+            cumulative_revenue += d["revenue_cents"]
             cumulative += to_inv
             if cumulative > cap:
                 return False, [f"event {ev['seq']}: cumulative investor payout exceeds the cap"]
