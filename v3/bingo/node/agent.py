@@ -74,6 +74,13 @@ class NodeAgent:
             completed = sum(1 for e in job.evidence if e.type == "UNIT_COMPLETE")
             if "qty" in ja.data and completed != ja.data["qty"]:
                 return False
+        else:
+            # NO bound job identity (no JOB_ACCEPTED carrying job_id) — the chain
+            # cannot be attributed to this job, so the money gate must FAIL CLOSED,
+            # exactly like the shipped document verifier (evidence.verify). Without
+            # this else a node emits an identity-less JOB_ACCEPTED and zero units
+            # and is still paid in full.
+            return False
         return True
 
     # -- job lifecycle -----------------------------------------------------------

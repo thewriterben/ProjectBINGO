@@ -263,6 +263,12 @@ def _verify_transport(pp: dict) -> tuple[bool, list[str]]:
             if not isinstance(_dmg, list) or not all(isinstance(x, str) for x in _dmg):
                 return False, notes + [f"event {ev['seq']}: {t} condition 'damage' "
                                        f"must be a list of strings"]
+            # odometer must be an int — escrow_decision computes a delivery-minus-
+            # pickup odometer delta; a string odometer verifies then crashes the
+            # settlement gate (bool is an int subclass, which is harmless here)
+            if not isinstance(_cond.get("odometer", 0), int):
+                return False, notes + [f"event {ev['seq']}: {t} condition 'odometer' "
+                                       f"must be an integer"]
         if t == "PICKUP":
             saw_pickup = True
         if t == "DELIVERY":
