@@ -108,23 +108,27 @@ def _verify(evidence: dict, expected_pubkey_hex: str | None = None) -> tuple[boo
     # bind top-level job identity to the SIGNED JOB_ACCEPTED event — otherwise the
     # unsigned metadata (asset_id/order_id/qty/job_id) can be relabeled, or another
     # node's genuine events spliced into a fabricated job record, and still verify.
+    # these fields are REQUIRED-present in the signed JOB_ACCEPTED and bound
+    # UNCONDITIONALLY — checking them "if present" let a node omit qty (or any
+    # field) to skip its binding/completeness check and be attested for 0 units.
     ja = next((e for e in events if e["type"] == "JOB_ACCEPTED"), None)
-    if ja and "job_id" in ja.get("data", {}):
-        jd = ja["data"]
-        for k in ("job_id", "order_id", "asset_id", "node_id", "qty", "royalty_assets"):
-            if k in jd and evidence.get(k) != jd[k]:
-                return False, notes + [f"top-level {k} != signed JOB_ACCEPTED "
-                                       f"(job identity forged/relabeled)"]
-        # the chain must actually EVIDENCE the signed quantity — a chain truncated
-        # short of its units (or with none at all) would otherwise settle in full
-        # for work never done (proof-of-fabrication soundness / conservation)
-        completed = sum(1 for e in events if e["type"] == "UNIT_COMPLETE")
-        if "qty" in jd and completed != jd["qty"]:
-            return False, notes + [f"unit evidence incomplete: {completed} "
-                                   f"UNIT_COMPLETE event(s) for a signed qty of {jd['qty']}"]
-    else:
-        return False, notes + ["no signed job identity (JOB_ACCEPTED with bound "
-                               "job_id) — cannot attribute this chain to a job"]
+    jd = ja.get("data", {}) if ja else {}
+    required = ("job_id", "order_id", "asset_id", "node_id", "qty", "royalty_assets")
+    if not ja or any(k not in jd for k in required):
+        return False, notes + ["no fully-bound job identity (JOB_ACCEPTED must "
+                               "carry job_id/order_id/asset_id/node_id/qty/"
+                               "royalty_assets) — cannot attribute this chain to a job"]
+    for k in required:
+        if evidence.get(k) != jd[k]:
+            return False, notes + [f"top-level {k} != signed JOB_ACCEPTED "
+                                   f"(job identity forged/relabeled)"]
+    # the chain must actually EVIDENCE the signed quantity — a chain truncated
+    # short of its units (or with none at all) would otherwise settle in full
+    # for work never done (proof-of-fabrication soundness / conservation)
+    completed = sum(1 for e in events if e["type"] == "UNIT_COMPLETE")
+    if completed != jd["qty"]:
+        return False, notes + [f"unit evidence incomplete: {completed} "
+                               f"UNIT_COMPLETE event(s) for a signed qty of {jd['qty']}"]
 
     types = [e["type"] for e in events]
     units = types.count("UNIT_COMPLETE")

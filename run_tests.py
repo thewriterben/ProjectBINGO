@@ -46,6 +46,7 @@ SUITE = [
     ("red-team round-5 regressions (11 confirmed breaks, all fixed)", "tests.test_redteam_r5_regressions", V3),
     ("red-team round-6 regressions (5 confirmed breaks, all fixed)", "tests.test_redteam_r6_regressions", V3),
     ("red-team round-7 regressions (2 confirmed breaks, all fixed)", "tests.test_redteam_r7_regressions", V3),
+    ("red-team round-8 regressions (1 confirmed break, all fixed)", "tests.test_redteam_r8_regressions", V3),
     ("sentinel classifier", "sentinel.test_sentinel", ROOT),
 ]
 

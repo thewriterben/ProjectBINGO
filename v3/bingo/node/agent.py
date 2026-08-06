@@ -61,25 +61,23 @@ class NodeAgent:
             prev = ev.hash
         # bind the Job's identity to the SIGNED JOB_ACCEPTED event — a relabeled
         # Job (or another node's events spliced under a different job) must fail
+        # the settlement gate must be attributable: the signed JOB_ACCEPTED has to
+        # carry the FULL job identity. These fields are REQUIRED-present, not
+        # checked "if present" — otherwise a node omits qty (or any field) from the
+        # signed event to skip its binding/completeness check and get paid for
+        # zero units. Every honest offer() emits all six (see offer()).
         ja = next((e for e in job.evidence if e.type == "JOB_ACCEPTED"), None)
-        if ja and "job_id" in ja.data:
-            for attr in ("job_id", "order_id", "asset_id", "node_id", "qty"):
-                if attr in ja.data and getattr(job, attr) != ja.data[attr]:
-                    return False
-            if "royalty_assets" in ja.data and \
-                    [l.asset_id for l in job.royalty_lines] != ja.data["royalty_assets"]:
+        required = ("job_id", "order_id", "asset_id", "node_id", "qty", "royalty_assets")
+        if not ja or any(k not in ja.data for k in required):
+            return False
+        for attr in ("job_id", "order_id", "asset_id", "node_id", "qty"):
+            if getattr(job, attr) != ja.data[attr]:
                 return False
-            # the settlement gate must confirm the signed quantity was actually
-            # produced — else a node that yields zero units is paid in full
-            completed = sum(1 for e in job.evidence if e.type == "UNIT_COMPLETE")
-            if "qty" in ja.data and completed != ja.data["qty"]:
-                return False
-        else:
-            # NO bound job identity (no JOB_ACCEPTED carrying job_id) — the chain
-            # cannot be attributed to this job, so the money gate must FAIL CLOSED,
-            # exactly like the shipped document verifier (evidence.verify). Without
-            # this else a node emits an identity-less JOB_ACCEPTED and zero units
-            # and is still paid in full.
+        if [l.asset_id for l in job.royalty_lines] != ja.data["royalty_assets"]:
+            return False
+        # the signed quantity must have actually been produced (no pay for 0 units)
+        completed = sum(1 for e in job.evidence if e.type == "UNIT_COMPLETE")
+        if completed != ja.data["qty"]:
             return False
         return True
 

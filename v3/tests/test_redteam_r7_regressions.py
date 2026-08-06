@@ -35,7 +35,8 @@ def test_verify_chain_fails_closed_without_identity():
     assert NodeAgent.verify_chain(job2, None) is False, "empty evidence must fail closed"
     # honest control: a bound JOB_ACCEPTED with the produced qty still verifies
     ja = _ev(0, "JOB_ACCEPTED",
-             {"node_id": "n", "job_id": "j", "order_id": "o", "asset_id": "a", "qty": 1},
+             {"node_id": "n", "job_id": "j", "order_id": "o", "asset_id": "a",
+              "qty": 1, "royalty_assets": []},
              "0" * 64)
     uc = _ev(1, "UNIT_COMPLETE", {"unit_serial": "j-u001"}, ja.hash)
     job3 = Job(job_id="j", order_id="o", asset_id="a", node_id="n", qty=1, material="PLA")
