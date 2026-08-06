@@ -130,14 +130,14 @@ securities offering. Demo: `python -m provenance.machine_rwa_demo`. Code:
 
 ## Status
 
-All seven verticals run as stdlib Python, **25/25 test suites** (`python
+All seven verticals run as stdlib Python, **26/26 test suites** (`python
 run_tests.py`) — including a one-kernel conformance suite that machine-checks the
 thesis itself, a fail-closed raise-readiness gate for the machine-RWA vertical
 (`provenance/raise_readiness.py`), an idempotent, crash-safe, reconciled
 payout-execution layer (`bingo/payout.py`) that drives a real Stripe/stablecoin
-rail without ever double-paying, and two red-team regression suites pinning 34
-adversary-found breaks closed across two rounds (see `claude/REDTEAM-FINDINGS.md`
-and `claude/REDTEAM-FINDINGS-R2.md`) — committed.
+rail without ever double-paying, and three red-team regression suites pinning 43
+adversary-found breaks closed across three rounds (see `claude/REDTEAM-FINDINGS.md`,
+`claude/REDTEAM-FINDINGS-R2.md`, and `claude/REDTEAM-FINDINGS-R3.md`) — committed.
 Every verifier trusts only signed bytes; conservation fails closed (no `assert`).
 Passports, tokens, coins, bills-of-lading, training corpora, and machine-share
 instruments verify from the document alone. These are
