@@ -130,16 +130,18 @@ securities offering. Demo: `python -m provenance.machine_rwa_demo`. Code:
 
 ## Status
 
-All seven verticals run as stdlib Python, **27/27 test suites** (`python
+All seven verticals run as stdlib Python, **28/28 test suites** (`python
 run_tests.py`) — including a one-kernel conformance suite that machine-checks the
 thesis itself, a fail-closed raise-readiness gate for the machine-RWA vertical
 (`provenance/raise_readiness.py`), an idempotent, crash-safe, reconciled
 payout-execution layer (`bingo/payout.py`) that drives a real Stripe/stablecoin
-rail without ever double-paying, and four red-team regression suites pinning 50
-adversary-found breaks closed across four rounds (see `claude/REDTEAM-FINDINGS.md`
-and `-R2`/`-R3`/`-R4`) — committed. Token share ownership is bound to a key at
-credit (an account has one controlling key for life); content-addressed ids are
-deterministic (no wall-clock in the identity hash).
+rail without ever double-paying, and five red-team regression suites pinning 61
+adversary-found breaks closed across five rounds (see `claude/REDTEAM-FINDINGS.md`
+and `-R2`…`-R5`) — committed. Token share ownership is bound to a key at credit
+(an account has one controlling key for life; keyless credits are terminal);
+content-addressed ids are deterministic (no wall-clock in the identity hash);
+and every document verifier fails CLOSED — returns (ok, notes), never raises —
+on arbitrary/adversarial input.
 Every verifier trusts only signed bytes; conservation fails closed (no `assert`).
 Passports, tokens, coins, bills-of-lading, training corpora, and machine-share
 instruments verify from the document alone. These are
