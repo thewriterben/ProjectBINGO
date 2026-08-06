@@ -1,7 +1,8 @@
 """Money movement, safely: paying the signed settlement legs is idempotent (no
 double-pay on replay/retry), crash-safe (PENDING journaled before the rail call,
 re-driven with the same key), fail-closed without credentials, survives restart,
-and reconciles back against the authoritative legs.
+reconciles against the authoritative legs, and is wired into the orchestrator so
+a settled order drives payouts end-to-end.
 
   python -m tests.test_payout
 """
@@ -12,7 +13,8 @@ import os
 import sys
 import tempfile
 
-from bingo.settlement import Leg
+from bingo.settlement import Leg, compute_settlement_legs
+from bingo.dfm import DfmReport
 from bingo.payout import (
     PayoutEngine, MockRail, StripeConnectRail, StablecoinRail,
     payout_key, PAID, PENDING, FAILED,
@@ -121,11 +123,32 @@ def main() -> int:
     assert payout_key(JOB, 0, "acct:a", 100) == payout_key(JOB, 0, "acct:a", 100)
     assert payout_key(JOB, 0, "acct:a", 100) != payout_key(JOB, 1, "acct:a", 100)
 
+    # -- end-to-end: a real settled order drives payouts through the engine ----
+    from tests.test_earnings import build as build_designs
+    reg, ledger, orch, bracket, clip = build_designs()
+    orch.payout_engine = PayoutEngine(MockRail())
+    dfm = DfmReport(True, [], 0, (0, 0, 0), 0.0, 6.0, 0.2)
+    o, dfm = orch.place_order(buyer="acct:buyer", asset_id=bracket.asset_id, qty=3,
+                              material="PLA", buyer_lat=39.7, buyer_lon=-105.0,
+                              dfm_override=dfm)
+    jobs = orch.execute_order(o, dfm)
+    assert jobs, "expected at least one settled job"
+    eng5 = orch.payout_engine
+    for job in jobs:                                    # every settled job fully paid
+        rep_j = eng5.reconcile_job(job.job_id, compute_settlement_legs(job))
+        assert rep_j["fully_settled"], rep_j
+    # orchestrator-level idempotency: re-driving the same jobs pays nothing twice
+    sent_before = len(eng5.rail.sent)
+    for job in jobs:
+        eng5.pay_legs(compute_settlement_legs(job), order_id=o.order_id, job_id=job.job_id)
+    assert len(eng5.rail.sent) == sent_before, "re-settling must not re-pay"
+
     print("OK - settlement payouts move money safely: idempotent (a replay/retry "
           "never double-pays), crash-safe (PENDING journaled before the rail call, "
           "re-driven with the same key), fail-closed without credentials, "
           "persistent across restart, and reconciled against the signed legs "
-          "(leakage in either direction is caught).")
+          "(leakage in either direction is caught); and wired into the "
+          "orchestrator so a settled order drives payouts end-to-end, idempotently.")
     return 0
 
 

@@ -30,13 +30,17 @@ class OrderRejected(Exception):
 
 class Orchestrator:
     def __init__(self, registry: AssetRegistry, ledger: Ledger, nodes: list[NodeAgent],
-                 evidence_dir: str | None = None, reputation_book=None):
+                 evidence_dir: str | None = None, reputation_book=None,
+                 payout_engine=None):
         self.registry = registry
         self.ledger = ledger
         self.nodes = {a.info.node_id: a for a in nodes}
         self.orders: dict[str, Order] = {}
         self.evidence_dir = evidence_dir   # if set, persist each settled job's chain
         self.reputation = reputation_book if reputation_book is not None else ReputationBook()
+        # if set, real money moves: settled legs are driven through a payout rail
+        # (bingo.payout.PayoutEngine) idempotently. None -> ledger-only (default).
+        self.payout_engine = payout_engine
 
     # -- intake -> quote -> match -> escrow ------------------------------------
 
@@ -168,6 +172,14 @@ class Orchestrator:
                 .record_completion(job.grade, proc, on_time=True, qa_pass=True)
             narrate(f"    ✓ settled atomically — {receipt.ref}, "
                     f"{len(receipt.legs)} legs")
+            if self.payout_engine is not None:
+                # drive the signed legs through the payout rail — idempotent, so a
+                # re-run or retry never double-pays. Ledger-of-record is unchanged.
+                recs = self.payout_engine.pay_legs(
+                    receipt.legs, order_id=order.order_id, job_id=job.job_id)
+                paid = sum(1 for r in recs if r.status == "PAID")
+                narrate(f"    ↳ payouts: {paid}/{len(recs)} legs paid "
+                        f"via {type(self.payout_engine.rail).__name__}")
             if self.evidence_dir:
                 path = evidence.save(job, agent.public_key_hex, self.evidence_dir)
                 narrate(f"    ↳ evidence persisted: {path} "
