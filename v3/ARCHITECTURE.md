@@ -130,15 +130,16 @@ securities offering. Demo: `python -m provenance.machine_rwa_demo`. Code:
 
 ## Status
 
-All seven verticals run as stdlib Python, **31/31 test suites** (`python
+All seven verticals run as stdlib Python, **32/32 test suites** (`python
 run_tests.py`) — including a one-kernel conformance suite that machine-checks the
 thesis itself, a fail-closed raise-readiness gate for the machine-RWA vertical
 (`provenance/raise_readiness.py`), an idempotent, crash-safe, reconciled
 payout-execution layer (`bingo/payout.py`) that drives a real Stripe/stablecoin
-rail without ever double-paying, and eight red-team regression suites pinning 69
-adversary-found breaks closed across eight rounds (see `claude/REDTEAM-FINDINGS.md`
-and `-R2`…`-R8`; the round-by-round confirmed count fell 19→15→9→7→11→5→2→1 as the
-kernel converged) — committed. Both settlement gates (the orchestrator's and the
+rail without ever double-paying, and nine red-team regression suites pinning 70
+adversary-found breaks closed across nine rounds (see `claude/REDTEAM-FINDINGS.md`
+and `-R2`…`-R9`; the round-by-round confirmed count fell 19→15→9→7→11→5→2→1→1 as
+the kernel converged, with 6 of 7 surfaces clean in each of the last three rounds)
+— committed. Sibling verifiers (passport ↔ token) enforce the same leg invariants. Both settlement gates (the orchestrator's and the
 document verifier's) fail closed in lockstep and require the FULL job identity
 (incl. qty) present+bound in the signed JOB_ACCEPTED, so a node can't be paid for
 zero fabricated units. Token share ownership is bound to a key at credit
