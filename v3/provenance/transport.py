@@ -172,10 +172,27 @@ def verify_transport(pp: dict) -> tuple[bool, list[str]]:
     if not events or events[0]["type"] != "BOOKING":
         return False, ["custody chain must open with a BOOKING"]
 
-    bound = pp.get("bound_carrier") or {}
+    # the carrier/customer/escrow bound "at booking" come from the broker-SIGNED
+    # BOOKING event, NOT the unsigned top-level fields (which a re-broker can
+    # rewrite to swap the carrier, redirect the payout account, change the amount,
+    # or swap in a colluding customer). Anything a settlement reads must trace to
+    # the signature.
+    bd = events[0].get("data", {})
+    bound = bd.get("carrier") or {}
     bound_pub = bound.get("pubkey")
     if not bound_pub:
-        return False, ["no carrier identity bound at booking"]
+        return False, ["no carrier identity bound in the signed BOOKING"]
+    bound_customer = bd.get("customer") or {}
+    # the unsigned top-level mirrors must equal the signed BOOKING, or the doc lies
+    if pp.get("bound_carrier") not in (None, bound):
+        return False, ["top-level bound_carrier != signed BOOKING carrier"]
+    if pp.get("bound_customer") not in (None, bound_customer):
+        return False, ["top-level bound_customer != signed BOOKING customer"]
+    esc = pp.get("escrow") or {}
+    if esc:
+        if esc.get("amount_cents") != bd.get("price_cents") or \
+           esc.get("carrier_cents") != bd.get("carrier_cents"):
+            return False, ["top-level escrow != signed BOOKING amounts"]
 
     prev = ZERO
     saw_pickup = saw_delivery = False
@@ -209,7 +226,7 @@ def verify_transport(pp: dict) -> tuple[bool, list[str]]:
             saw_delivery = True
             # customer (bound at booking) must have co-signed acceptance for THIS vehicle
             acc = ev["data"].get("acceptance") or {}
-            crec = pp.get("bound_customer") or {}
+            crec = bound_customer          # from the SIGNED BOOKING, not top-level
             if not crec.get("pubkey"):
                 return False, notes + [f"event {ev['seq']}: no customer bound at booking"]
             if acc.get("customer") != crec.get("actor_id"):
@@ -236,10 +253,15 @@ def escrow_decision(pp: dict) -> dict:
     any new damage as a claim (release still allowed, claim flagged for the
     broker to resolve — the point is nobody can hide it)."""
     ok, notes = verify_transport(pp)
-    esc = dict(pp.get("escrow", {}))
     if not ok:
         return {"release": False, "status": "BLOCKED", "to": None, "amount_cents": 0,
                 "reason": notes[-1], "damage_claim": None}
+    # amounts + payout account come from the SIGNED BOOKING (verify already
+    # confirmed any top-level mirror matches), never the unsigned top-level fields
+    bd = pp["events"][0].get("data", {})
+    carrier_cents = bd.get("carrier_cents", 0)
+    broker_fee_cents = bd.get("price_cents", 0) - carrier_cents
+    carrier_acct = (bd.get("carrier") or {}).get("account")
 
     evs = {e["type"]: e for e in pp["events"]}
     if "DELIVERY" not in evs:
@@ -250,11 +272,10 @@ def escrow_decision(pp: dict) -> dict:
     delivery_cond = evs["DELIVERY"]["data"].get("condition", {})
     new_damage = damage_delta(pickup_cond, delivery_cond)
 
-    carrier_acct = (pp.get("bound_carrier") or {}).get("account")
     return {
         "release": True, "status": "RELEASED", "to": carrier_acct,
-        "amount_cents": esc.get("carrier_cents", 0),
-        "broker_fee_cents": esc.get("broker_fee_cents", 0),
+        "amount_cents": carrier_cents,
+        "broker_fee_cents": broker_fee_cents,
         "reason": "delivered by the bound carrier and accepted by the customer",
         "damage_claim": {"new_damage": new_damage,
                          "odometer_delta": delivery_cond.get("odometer", 0)

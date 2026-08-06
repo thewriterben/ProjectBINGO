@@ -214,10 +214,31 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
         paid = sum(l["cents"] for l in signed_legs)
         if paid != price:
             return False, notes + [f"settlement {paid}¢ != sale price {price}¢"]
+        # the legs must MATCH the declared split — not merely conserve the total.
+        # Otherwise a self-dealing seller signs legs paying themselves 100% while
+        # the certificate's `split` advertises the rancher's cut (the money and the
+        # displayed split disagree). Re-derive from the signed split and compare.
+        split_payees = (sale["data"].get("split") or {}).get("payees", [])
+        exp, dist = [], 0
+        for p in split_payees:
+            amt = (price * p["bps"]) // 10_000
+            exp.append({"account": p["account"], "cents": amt})
+            dist += amt
+        if exp and price - dist:
+            exp[0]["cents"] += price - dist
+        agg_legs, agg_exp = {}, {}
+        for l in signed_legs:
+            agg_legs[l["account"]] = agg_legs.get(l["account"], 0) + l["cents"]
+        for l in exp:
+            agg_exp[l["account"]] = agg_exp.get(l["account"], 0) + l["cents"]
+        if agg_legs != agg_exp:
+            return False, notes + ["SALE legs don't match the declared split "
+                                   "(money routed differently than the certificate shows)"]
         # if a top-level settlement is present it must equal the signed legs
         if passport.get("settlement", signed_legs) != signed_legs:
             return False, notes + ["top-level settlement doesn't match the signed SALE legs"]
-        notes.append(f"settlement conserves {price}¢ across {len(signed_legs)} signed payees")
+        notes.append(f"settlement conserves {price}¢ across {len(signed_legs)} signed payees "
+                     f"matching the declared split")
 
     notes.append(f"{len(events)} links, {len(signers)} signer(s): "
                  f"{' -> '.join(roles_seen)}")

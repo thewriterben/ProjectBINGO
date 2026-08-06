@@ -203,6 +203,8 @@ class AssetToken:
         if self.balances.get(seller.account, 0) < shares:
             raise TokenError(f"insufficient balance: {seller.account} holds "
                              f"{self.balances.get(seller.account, 0)}, needs {shares}")
+        if not (0 <= resale_royalty_bps <= 10_000):
+            raise TokenError("resale_royalty_bps must be in [0, 10000]")
         primary = seller.actor_id == self.issuer
         if not primary and resale_royalty_bps and not self.value_split:
             raise TokenError("no value split to route a resale royalty through")
@@ -353,6 +355,8 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
                 return False, notes + ["top-level passport_head != signed ISSUE"]
             if token.get("backing_asset_id") != d["backing_asset_id"]:
                 return False, notes + ["top-level backing_asset_id != signed ISSUE"]
+            if token.get("unit") != d["unit"]:
+                return False, notes + ["top-level unit != signed ISSUE (what a share represents)"]
             signed_head = d["passport_head"]
         elif t == "TRANSFER":
             # only the owner can move their own shares
@@ -394,11 +398,19 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
             actual_primary = (who == token.get("issuer"))
             if bool(d.get("primary")) != actual_primary:
                 return False, notes + [f"event {ev['seq']}: primary flag mismatch"]
+            if d.get("price_cents", 0) < 0:
+                return False, notes + [f"event {ev['seq']}: negative price"]
+            # royalty bps must be in range — an out-of-range value yields negative
+            # legs that still 'conserve' to the price but misdirect the money
+            if not (0 <= d.get("royalty_bps", 0) <= 10_000):
+                return False, notes + [f"event {ev['seq']}: resale royalty_bps out of range"]
             expected = _sale_legs(d["price_cents"], actual_primary,
                                   d.get("royalty_bps", 0), rec["account"],
                                   token.get("value_split", []))
             if _agg(d.get("legs", [])) != _agg(expected):
                 return False, notes + [f"event {ev['seq']}: settlement legs don't match the split"]
+            if any(l["cents"] < 0 for l in d.get("legs", [])):
+                return False, notes + [f"event {ev['seq']}: negative payout leg"]
             if sum(l["cents"] for l in d.get("legs", [])) != d["price_cents"]:
                 return False, notes + [f"event {ev['seq']}: sale proceeds not conserved"]
             bal[d["from"]] -= d["shares"]

@@ -80,6 +80,11 @@ def _distribute(holdings: dict, investor_share_bps: int, revenue_cents: int,
         entitlement = min(((cumulative_revenue_before + revenue_cents) * investor_share_bps)
                           // 10_000, cap_cents)
         investor_pool = max(0, entitlement - cumulative_paid)
+        # HARD conservation floor: a single event can never pay investors more
+        # than the cash that entered THAT event, so the operator's slice is never
+        # negative and no cents are created. (Catch-up from prior sub-cent flooring
+        # is at most a few cents, so this clamp only bites the pathological case.)
+        investor_pool = min(investor_pool, max(0, revenue_cents))
 
     legs: list[dict] = []
     dist = 0
@@ -90,11 +95,18 @@ def _distribute(holdings: dict, investor_share_bps: int, revenue_cents: int,
                 legs.append({"account": acct, "cents": amt})
                 dist += amt
         residue = investor_pool - dist
-        if residue > 0 and legs:
-            # largest holder among those who got a leg (ties: earliest account)
-            top = max(range(len(legs)),
-                      key=lambda i: (holdings[legs[i]["account"]], -i))
-            legs[top]["cents"] += residue
+        if residue > 0:
+            if legs:
+                # largest holder among those who got a leg (ties: earliest account)
+                top = max(range(len(legs)),
+                          key=lambda i: (holdings[legs[i]["account"]], -i))
+                legs[top]["cents"] += residue
+            else:
+                # every holder floored to zero (a pool smaller than the holder
+                # count) — the largest holder takes the whole pool, so a tiny
+                # capped catch-up still pays out instead of vanishing
+                top_acct = max(sorted(holdings), key=lambda a: holdings[a])
+                legs.append({"account": top_acct, "cents": residue})
             dist += residue
 
     to_investors = dist
@@ -175,7 +187,7 @@ class MachineShare:
         legs, to_inv, to_op = _distribute(
             self.holdings(), self.investor_share_bps, revenue_cents,
             self.cumulative_paid(), self.repayment_cap_cents,
-            cumulative_revenue_before=self._cumulative_revenue())
+            cumulative_revenue_before=self._creditable_revenue())
         data = {"revenue_cents": revenue_cents, "event_ref": event_ref,
                 "to_investors": to_inv, "to_operator": to_op, "legs": legs,
                 "cumulative_after": self.cumulative_paid() + to_inv}
@@ -200,8 +212,18 @@ class MachineShare:
     def cumulative_paid(self) -> int:
         return sum(e["data"]["to_investors"] for e in self.events if e["type"] == "EARN")
 
-    def _cumulative_revenue(self) -> int:
-        return sum(e["data"]["revenue_cents"] for e in self.events if e["type"] == "EARN")
+    def _creditable_revenue(self) -> int:
+        """Revenue that counts toward investor entitlement: only revenue earned
+        while there ARE shareholders. Revenue earned before anyone bought (the
+        subscription window) went 100% to the operator and can't be retroactively
+        claimed by later buyers."""
+        total, sold = 0, 0
+        for e in self.events:
+            if e["type"] == "BUY":
+                sold += e["data"]["shares"]
+            elif e["type"] == "EARN" and sold > 0:
+                total += e["data"]["revenue_cents"]
+        return total
 
     def fully_repaid(self) -> bool:
         return self.cumulative_paid() >= self.repayment_cap_cents
@@ -299,13 +321,21 @@ def verify_machine_share(doc: dict) -> tuple[bool, list[str]]:
             if d["event_ref"] in seen_refs:
                 return False, [f"event {ev['seq']}: duplicate earning event_ref (double count)"]
             seen_refs.add(d["event_ref"])
+            # revenue must be strictly positive — a negative/zero EARN would let an
+            # operator net down booked revenue to starve investors (mirror earn())
+            if d["revenue_cents"] <= 0:
+                return False, [f"event {ev['seq']}: EARN revenue_cents must be positive"]
             legs, to_inv, to_op = _distribute(holdings, bps, d["revenue_cents"], cumulative,
                                               cap, cumulative_revenue_before=cumulative_revenue)
             if legs != d["legs"] or to_inv != d["to_investors"] or to_op != d["to_operator"]:
                 return False, [f"event {ev['seq']}: distribution does not match recomputation"]
             if to_inv + to_op != d["revenue_cents"]:
                 return False, [f"event {ev['seq']}: distribution does not conserve"]
-            cumulative_revenue += d["revenue_cents"]
+            if to_op < 0 or to_inv < 0:
+                return False, [f"event {ev['seq']}: negative payout slice (over-distribution)"]
+            # only revenue earned while there are shareholders is creditable
+            if sum(holdings.values()) > 0:
+                cumulative_revenue += d["revenue_cents"]
             cumulative += to_inv
             if cumulative > cap:
                 return False, [f"event {ev['seq']}: cumulative investor payout exceeds the cap"]

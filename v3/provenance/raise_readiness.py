@@ -117,10 +117,13 @@ def readiness_report(doc: dict, verified_revenue_periods: list[int],
     periods = list(verified_revenue_periods or [])
     positive = [p for p in periods if p > 0]
     basis = sum(positive)
-    if len(positive) < ctx.required_revenue_months:
+    # floor the caller-controlled threshold to >=1 so "no revenue" can never
+    # satisfy the gate (and never hits a 0/0 in the note below)
+    required = max(1, ctx.required_revenue_months)
+    if len(positive) < required:
         blockers.append(
             f"insufficient verified-revenue history: {len(positive)} positive "
-            f"period(s), need >= {ctx.required_revenue_months} "
+            f"period(s), need >= {required} "
             f"(underwrite from real, PoF-verified earnings - not projections)")
     else:
         satisfied.append(f"verified-revenue basis: {len(positive)} periods, "
@@ -140,7 +143,15 @@ def readiness_report(doc: dict, verified_revenue_periods: list[int],
 def term_sheet(doc: dict, verified_revenue_periods: list[int] | None = None) -> str:
     """A human-readable term sheet rendered from the SIGNED offering - a
     block-explorer view of the OPEN event, pinned to its hash. This is NOT an
-    offer to sell securities; it renders terms that already exist on the ledger."""
+    offer to sell securities; it renders terms that already exist on the ledger.
+
+    Fails closed: a forged or tampered offering (one that doesn't verify from the
+    document alone) is refused, so this can never render attacker-controlled
+    top-level numbers under a 'signed offering' banner."""
+    ok, why = verify_machine_share(doc)
+    if not ok:
+        raise ValueError(f"refusing to render a term sheet for an offering that "
+                         f"does not verify: {why[-1] if why else '?'}")
     t = _terms(doc)
     periods = [p for p in (verified_revenue_periods or []) if p > 0]
     lines = [
@@ -214,7 +225,11 @@ def disclosure_inputs(doc: dict, verified_revenue_periods: list[int],
     offer, and NOT legal advice - it is a structured starting point built from the
     signed offering and the real verified-revenue basis. Fails closed if there is
     no verified-revenue basis (you cannot draft an honest use-of-proceeds and
-    financial picture from a machine that has not provably earned)."""
+    financial picture from a machine that has not provably earned). Also fails
+    closed if the offering itself does not verify."""
+    ok, why = verify_machine_share(doc)
+    if not ok:
+        raise ValueError(f"offering does not verify: {why[-1] if why else '?'}")
     periods = [p for p in (verified_revenue_periods or []) if p > 0]
     if not periods:
         raise ValueError("no verified-revenue basis: cannot assemble honest "

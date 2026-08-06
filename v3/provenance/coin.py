@@ -147,13 +147,21 @@ class ValidationBackend(ABC):
 
 class StubValidationBackend(ValidationBackend):
     """Records what it WOULD post. Marks where DGD's USDC-of-DGD crediting plugs
-    in (TODO(real): call DGD's account/validation API here)."""
+    in (TODO(real): call DGD's account/validation API here).
+
+    CONTRACT: credit() MUST be idempotent on coin_serial — a real backend keys
+    on the serial so the same coin can never be credited twice even if the caller
+    re-drives it (e.g. after a ledger rollback). This stub models that."""
 
     def __init__(self):
         self.postings: list[dict] = []
+        self._by_serial: dict[str, str] = {}     # coin_serial -> ref (idempotency)
 
     def credit(self, account: str, cents: int, coin_serial: str, ts: str) -> dict:
+        if coin_serial in self._by_serial:
+            return {"ok": True, "ref": self._by_serial[coin_serial], "idempotent": True}
         ref = f"stub:{coin_serial}"
+        self._by_serial[coin_serial] = ref
         self.postings.append({"account": account, "cents": cents,
                               "coin_serial": coin_serial, "ts": ts, "ref": ref})
         return {"ok": True, "ref": ref}
@@ -172,8 +180,13 @@ class RedemptionRegistry:
       * `backend` (a ValidationBackend) posts the actual $25 credit. The coin is
         marked spent and persisted BEFORE crediting, so a backend hiccup can
         never double-credit; unposted credits are retried via retry_pending().
-      * loading a TAMPERED ledger file fails closed (raises), because the chain
-        is validator-signed — an edited file can't pass verify_registry.
+      * loading a TAMPERED ledger fails closed: mutation/forgery is caught by the
+        validator signatures + hash chain, and *truncation/rollback* (deleting the
+        trailing POSTED, or emptying the chain — a valid signed prefix is still a
+        valid signed chain) is caught by a sidecar anti-rollback anchor that pins
+        the last head+length. If an attacker can rewrite the anchor too, the
+        backend's serial-keyed idempotency (see ValidationBackend) still prevents a
+        real double-credit.
     """
 
     def __init__(self, validator: Actor, trusted_issuer_pubkey: str,
@@ -181,6 +194,7 @@ class RedemptionRegistry:
         self.validator = validator
         self.trusted_issuer_pubkey = trusted_issuer_pubkey
         self.store_path = store_path
+        self.anchor_path = (store_path + ".anchor") if store_path else None
         self.backend = backend
         self.redeemed: dict[str, dict] = {}     # serial -> signed redemption record
         self.credits: dict[str, int] = {}       # account -> credited cents
@@ -208,6 +222,22 @@ class RedemptionRegistry:
         # _try_post / retry_pending, which key off the SIGNED chain).
         self.postings = {s: p for s, p in data.get("postings", {}).items()
                          if s in self.redeemed}
+        # anti-rollback: a validator-signed chain is still truncatable — any valid
+        # PREFIX (incl. empty) of a signed chain is itself a valid signed chain, so
+        # deleting the trailing POSTED (or all events) would "forget" a spent coin
+        # and re-credit it. The sidecar anchor pins the last-known head+length; the
+        # loaded chain must EXTEND it. (Backend idempotency on the serial is the
+        # ultimate guarantee if an attacker rewrites the anchor too — see the
+        # ValidationBackend contract.)
+        if self.anchor_path and os.path.exists(self.anchor_path):
+            with open(self.anchor_path) as f:
+                anchor = json.load(f)
+            alen = anchor.get("len", 0)
+            if len(self.events) < alen:
+                raise CoinError("redemption ledger rollback/truncation detected "
+                                f"({len(self.events)} events < anchored {alen})")
+            if alen > 0 and self.events[alen - 1]["hash"] != anchor.get("head"):
+                raise CoinError("redemption ledger head anchor mismatch (rollback)")
 
     def _persist(self):
         if not self.store_path:
@@ -217,6 +247,13 @@ class RedemptionRegistry:
         with open(tmp, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
         os.replace(tmp, self.store_path)     # atomic — no torn writes
+        # update the anti-rollback anchor AFTER the store is committed
+        anchor = {"len": len(self.events),
+                  "head": self.events[-1]["hash"] if self.events else ZERO}
+        atmp = self.anchor_path + ".tmp"
+        with open(atmp, "w") as f:
+            json.dump(anchor, f)
+        os.replace(atmp, self.anchor_path)
 
     def _emit(self, type_: str, data: dict, ts: str):
         ev = {"seq": len(self.events), "ts": ts, "type": type_,

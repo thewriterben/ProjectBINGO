@@ -93,6 +93,20 @@ def verify(evidence: dict, expected_pubkey_hex: str | None = None) -> tuple[bool
             return False, notes + [f"event {ev['seq']}: signature not hex"]
         prev = ev["hash"]
 
+    # bind top-level job identity to the SIGNED JOB_ACCEPTED event — otherwise the
+    # unsigned metadata (asset_id/order_id/qty/job_id) can be relabeled, or another
+    # node's genuine events spliced into a fabricated job record, and still verify.
+    ja = next((e for e in events if e["type"] == "JOB_ACCEPTED"), None)
+    if ja and "job_id" in ja.get("data", {}):
+        jd = ja["data"]
+        for k in ("job_id", "order_id", "asset_id", "qty", "royalty_assets"):
+            if k in jd and evidence.get(k) != jd[k]:
+                return False, notes + [f"top-level {k} != signed JOB_ACCEPTED "
+                                       f"(job identity forged/relabeled)"]
+    else:
+        return False, notes + ["no signed job identity (JOB_ACCEPTED with bound "
+                               "job_id) — cannot attribute this chain to a job"]
+
     types = [e["type"] for e in events]
     units = types.count("UNIT_COMPLETE")
     notes.append(f"{len(events)} events, {units} unit(s) complete, "

@@ -59,6 +59,16 @@ class NodeAgent:
                 except ValueError:
                     return False
             prev = ev.hash
+        # bind the Job's identity to the SIGNED JOB_ACCEPTED event — a relabeled
+        # Job (or another node's events spliced under a different job) must fail
+        ja = next((e for e in job.evidence if e.type == "JOB_ACCEPTED"), None)
+        if ja and "job_id" in ja.data:
+            for attr in ("job_id", "order_id", "asset_id", "qty"):
+                if attr in ja.data and getattr(job, attr) != ja.data[attr]:
+                    return False
+            if "royalty_assets" in ja.data and \
+                    [l.asset_id for l in job.royalty_lines] != ja.data["royalty_assets"]:
+                return False
         return True
 
     # -- job lifecycle -----------------------------------------------------------
@@ -73,7 +83,12 @@ class NodeAgent:
         self._emit(job, "JOB_ACCEPTED",
                    {"terms_sha256": sha256_hex(canonical_json(terms)),
                     "node_id": self.info.node_id,
-                    "node_pubkey": self.public_key_hex})  # chain is self-describing
+                    "node_pubkey": self.public_key_hex,
+                    # bind job identity INTO the signed chain, so the top-level
+                    # metadata can't be relabeled (asset/order/qty forgery)
+                    "job_id": job.job_id, "order_id": job.order_id,
+                    "asset_id": job.asset_id, "qty": job.qty,
+                    "royalty_assets": [l.asset_id for l in job.royalty_lines]})
         return True
 
     def fabricate(self, job: Job, gcode: bytes, est_minutes_per_unit: float):
