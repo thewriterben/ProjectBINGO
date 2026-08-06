@@ -130,14 +130,16 @@ securities offering. Demo: `python -m provenance.machine_rwa_demo`. Code:
 
 ## Status
 
-All seven verticals run as stdlib Python, **29/29 test suites** (`python
+All seven verticals run as stdlib Python, **30/30 test suites** (`python
 run_tests.py`) — including a one-kernel conformance suite that machine-checks the
 thesis itself, a fail-closed raise-readiness gate for the machine-RWA vertical
 (`provenance/raise_readiness.py`), an idempotent, crash-safe, reconciled
 payout-execution layer (`bingo/payout.py`) that drives a real Stripe/stablecoin
-rail without ever double-paying, and six red-team regression suites pinning 66
-adversary-found breaks closed across six rounds (see `claude/REDTEAM-FINDINGS.md`
-and `-R2`…`-R6`) — committed. Token share ownership is bound to a key at credit
+rail without ever double-paying, and seven red-team regression suites pinning 68
+adversary-found breaks closed across seven rounds (see `claude/REDTEAM-FINDINGS.md`
+and `-R2`…`-R7`; the round-by-round confirmed count fell 19→15→9→7→11→5→2 as the
+kernel converged) — committed. Both settlement gates (the orchestrator's and the
+document verifier's) fail closed in lockstep. Token share ownership is bound to a key at credit
 (an account has one controlling key for life; keyless credits are terminal);
 content-addressed ids are deterministic (no wall-clock in the identity hash);
 every document verifier fails CLOSED — returns (ok, notes), never raises — on
