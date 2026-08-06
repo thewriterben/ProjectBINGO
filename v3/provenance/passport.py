@@ -269,6 +269,13 @@ def _verify_passport(passport: dict) -> tuple[bool, list[str]]:
             return False, notes + [f"SALE seq {sale['seq']}: split has a non-positive bps"]
         if split_payees and sum(p["bps"] for p in split_payees) != 10_000:
             return False, notes + [f"SALE seq {sale['seq']}: split bps don't sum to 10000"]
+        # no negative per-leg payouts — the by-account aggregate check below can be
+        # satisfied by offsetting +/- legs (e.g. rancher +$10.39 / -$9.99) that
+        # conserve on net but render a VERIFIED certificate showing a payee getting
+        # far more than the sale price, and would over-pay any consumer that pays
+        # positive legs without netting. The sibling token verifier guards this too.
+        if any(l["cents"] < 0 for l in signed_legs):
+            return False, notes + [f"SALE seq {sale['seq']}: negative payout leg"]
         exp, dist = [], 0
         for p in split_payees:
             amt = (price * p["bps"]) // 10_000
