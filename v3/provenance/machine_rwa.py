@@ -304,7 +304,8 @@ def verify_machine_share(doc: dict) -> tuple[bool, list[str]]:
                 return False, ["OPEN not signed by the operator"]
             # the mutable top-level terms must match the signed OPEN event
             for k, signed_v in (("total_shares", total), ("investor_share_bps", bps),
-                                ("repayment_cap_cents", cap), ("price_cents", price)):
+                                ("repayment_cap_cents", cap), ("price_cents", price),
+                                ("machine_id", od.get("machine_id"))):
                 if doc.get(k) != signed_v:
                     return False, [f"top-level {k} != signed OPEN event"]
         elif t == "BUY":

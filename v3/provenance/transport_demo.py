@@ -52,7 +52,7 @@ def honest() -> TransportPassport:
     pp.transit(a, "Las Vegas, NV", ts="2026-08-06T02:00:00Z")
     acc = make_acceptance(cust, vin=VIN,
                           cond=condition(12995, damage=[], photos_sha256="b2"*16),
-                          ts="2026-08-07T14:05:00Z")
+                          booking_hash=pp.events[0]["hash"], ts="2026-08-07T14:05:00Z")
     pp.deliver(a, acc, condition(12995, damage=[], photos_sha256="b2"*16),
                location="Sun Valley, ID", ts="2026-08-07T14:10:00Z")
     return pp
@@ -67,7 +67,8 @@ def double_brokered() -> TransportPassport:
     # a DIFFERENT carrier (b) actually picks up and delivers — the re-broker
     pp.pickup(b, condition(12340, photos_sha256="a1"*16), location="Scottsdale, AZ",
               ts="2026-08-05T09:20:00Z")
-    acc = make_acceptance(cust, vin=VIN, cond=condition(12995), ts="2026-08-07T14:05:00Z")
+    acc = make_acceptance(cust, vin=VIN, cond=condition(12995),
+                          booking_hash=pp.events[0]["hash"], ts="2026-08-07T14:05:00Z")
     pp.deliver(b, acc, condition(12995), location="Sun Valley, ID",
                ts="2026-08-07T14:10:00Z")
     return pp
@@ -83,7 +84,8 @@ def with_damage() -> TransportPassport:
               location="Scottsdale, AZ", ts="2026-08-05T09:20:00Z")
     dmg = condition(12995, damage=["passenger door: 3in scuff", "front lip: rock chip"],
                     photos_sha256="c3"*16)
-    acc = make_acceptance(cust, vin=VIN, cond=dmg, ts="2026-08-07T14:05:00Z")
+    acc = make_acceptance(cust, vin=VIN, cond=dmg,
+                          booking_hash=pp.events[0]["hash"], ts="2026-08-07T14:05:00Z")
     pp.deliver(a, acc, dmg, location="Sun Valley, ID", ts="2026-08-07T14:10:00Z")
     return pp
 

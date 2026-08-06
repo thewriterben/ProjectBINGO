@@ -42,7 +42,8 @@ def main() -> int:
     # ---- honest move: verifies, escrow releases to the bound carrier ----
     pp = booked(broker, bound, cust)
     pp.pickup(bound, condition(12340), location="AZ", ts="t1")
-    acc = make_acceptance(cust, vin=VIN, cond=condition(12995), ts="t2")
+    acc = make_acceptance(cust, vin=VIN, cond=condition(12995),
+                          booking_hash=pp.events[0]["hash"], ts="t2")
     pp.deliver(bound, acc, condition(12995), location="ID", ts="t3")
     d = pp.to_dict()
     ok, notes = verify_transport(d)
@@ -57,7 +58,8 @@ def main() -> int:
     # ---- THE guarantee: a different truck delivers -> can't verify, can't settle ----
     pp = booked(broker, bound, cust)
     pp.pickup(ghost, condition(12340), ts="t1")             # re-broker picks up
-    acc = make_acceptance(cust, vin=VIN, cond=condition(12995), ts="t2")
+    acc = make_acceptance(cust, vin=VIN, cond=condition(12995),
+                          booking_hash=pp.events[0]["hash"], ts="t2")
     pp.deliver(ghost, acc, condition(12995), ts="t3")
     bad, why = verify_transport(pp.to_dict())
     assert not bad and "double brokering detected" in why[-1], why
@@ -66,7 +68,8 @@ def main() -> int:
     # a re-broker who swaps in only at DELIVERY is caught too
     pp = booked(broker, bound, cust)
     pp.pickup(bound, condition(12340), ts="t1")
-    acc = make_acceptance(cust, vin=VIN, cond=condition(12995), ts="t2")
+    acc = make_acceptance(cust, vin=VIN, cond=condition(12995),
+                          booking_hash=pp.events[0]["hash"], ts="t2")
     pp.deliver(ghost, acc, condition(12995), ts="t3")       # delivered by wrong carrier
     bad, why = verify_transport(pp.to_dict())
     assert not bad and "double brokering detected" in why[-1], why
@@ -75,14 +78,16 @@ def main() -> int:
     pp = booked(broker, bound, cust)
     pp.pickup(bound, condition(12340), ts="t1")
     imposter = Actor.create("imp", "Imposter", "customer", "acct:customer")
-    acc_bad = make_acceptance(imposter, vin=VIN, cond=condition(12995), ts="t2")
+    acc_bad = make_acceptance(imposter, vin=VIN, cond=condition(12995),
+                              booking_hash=pp.events[0]["hash"], ts="t2")
     pp.deliver(bound, acc_bad, condition(12995), ts="t3")
     bad, why = verify_transport(pp.to_dict())
     assert not bad and "not by the booked customer" in why[-1], why
 
     pp = booked(broker, bound, cust)
     pp.pickup(bound, condition(12340), ts="t1")
-    acc_vin = make_acceptance(cust, vin="OTHERVIN00000000", cond=condition(12995), ts="t2")
+    acc_vin = make_acceptance(cust, vin="OTHERVIN00000000", cond=condition(12995),
+                              booking_hash=pp.events[0]["hash"], ts="t2")
     pp.deliver(bound, acc_vin, condition(12995), ts="t3")
     bad, why = verify_transport(pp.to_dict())
     assert not bad and "different vehicle" in why[-1], why
@@ -92,7 +97,8 @@ def main() -> int:
     pp.pickup(bound, condition(12340), ts="t1")
     from provenance.transport import _acceptance_body
     forged = {"passport_subject_vin": VIN, "customer": "cust",
-              "condition": condition(12995), "ts": "t2"}
+              "condition": condition(12995), "booking_hash": pp.events[0]["hash"],
+              "ts": "t2"}
     forged["sig"] = imposter.sign(_acceptance_body(forged))     # not cust's key
     forged["pubkey"] = imposter.pubkey_hex
     pp.deliver(bound, forged, condition(12995), ts="t3")
@@ -102,7 +108,8 @@ def main() -> int:
     # ---- tamper & reorder are caught ----
     pp = booked(broker, bound, cust)
     pp.pickup(bound, condition(12340), ts="t1")
-    acc = make_acceptance(cust, vin=VIN, cond=condition(12995), ts="t2")
+    acc = make_acceptance(cust, vin=VIN, cond=condition(12995),
+                          booking_hash=pp.events[0]["hash"], ts="t2")
     pp.deliver(bound, acc, condition(12995), ts="t3")
     good = pp.to_dict()
 
@@ -120,7 +127,8 @@ def main() -> int:
     pp = booked(broker, bound, cust)
     pp.pickup(bound, condition(12340, damage=[]), ts="t1")
     dmg = condition(12995, damage=["door scuff"])
-    acc = make_acceptance(cust, vin=VIN, cond=dmg, ts="t2")
+    acc = make_acceptance(cust, vin=VIN, cond=dmg,
+                          booking_hash=pp.events[0]["hash"], ts="t2")
     pp.deliver(bound, acc, dmg, ts="t3")
     d = pp.to_dict()
     ok, _ = verify_transport(d)

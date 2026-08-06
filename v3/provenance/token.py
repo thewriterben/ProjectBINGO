@@ -152,14 +152,20 @@ class AssetToken:
         self._receipt_used: dict[str, int] = {}   # delivery_ref -> shares redeemed against it
         self.events: list[dict] = []
 
+        # the value-routing split (who gets paid on a sale — the rancher) and the
+        # designated fulfiller (whose receipt gates physical redemption) are bound
+        # INTO the token_id and the signed ISSUE, so neither can be forged/stripped
+        # from the mutable top level without breaking the id or the issuer's sig.
         manifest = {"schema": SCHEMA, "backing_asset_id": backing_asset_id,
                     "passport_head": passport_head, "unit": unit,
-                    "total_supply": total_supply, "issuer": issuer.actor_id}
+                    "total_supply": total_supply, "issuer": issuer.actor_id,
+                    "value_split": self.value_split, "fulfiller": self.fulfiller}
         self.token_id = sha256_hex(canonical_json(manifest))
         self._emit(issuer, "ISSUE", {
             "to": issuer.account, "shares": total_supply,
             "backing_asset_id": backing_asset_id, "passport_head": passport_head,
-            "unit": unit}, ts=ts)
+            "unit": unit, "value_split": self.value_split,
+            "fulfiller": self.fulfiller}, ts=ts)
         self.balances[issuer.account] = total_supply
 
     # -- signed, hash-chained ledger --------------------------------------
@@ -307,7 +313,7 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
         return False, ["token must open with an ISSUE event"]
 
     supply = token.get("total_supply", 0)
-    fulfiller = token.get("fulfiller")
+    fulfiller = None                       # the fulfiller from the SIGNED ISSUE (set below)
     bal: dict[str, int] = {}
     retired = 0
     prev = ZERO
@@ -348,7 +354,9 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
             # its id or the issuer's signature.
             manifest = {"schema": SCHEMA, "backing_asset_id": d["backing_asset_id"],
                         "passport_head": d["passport_head"], "unit": d["unit"],
-                        "total_supply": d["shares"], "issuer": who}
+                        "total_supply": d["shares"], "issuer": who,
+                        "value_split": d.get("value_split", []),
+                        "fulfiller": d.get("fulfiller")}
             if sha256_hex(canonical_json(manifest)) != token.get("token_id"):
                 return False, notes + ["token_id does not match its signed manifest"]
             if token.get("passport_head") != d["passport_head"]:
@@ -357,6 +365,14 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
                 return False, notes + ["top-level backing_asset_id != signed ISSUE"]
             if token.get("unit") != d["unit"]:
                 return False, notes + ["top-level unit != signed ISSUE (what a share represents)"]
+            # the routing split (rancher's cut) and the physical-settlement gate
+            # come from the SIGNED ISSUE, not the mutable top level — stripping or
+            # rewriting either must be rejected even on a pre-sale token
+            if token.get("value_split", []) != d.get("value_split", []):
+                return False, notes + ["top-level value_split != signed ISSUE (routing forged)"]
+            if token.get("fulfiller") != d.get("fulfiller"):
+                return False, notes + ["top-level fulfiller != signed ISSUE (redemption gate stripped)"]
+            fulfiller = d.get("fulfiller")
             signed_head = d["passport_head"]
         elif t == "TRANSFER":
             # only the owner can move their own shares

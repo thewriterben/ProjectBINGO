@@ -111,6 +111,13 @@ class CutPassport:
     def attest(self, actor: Actor, type_: str, data: dict, ts: str | None = None) -> PassportEvent:
         """Append a link, signed by `actor`, hash-chained onto the head."""
         self.signers.setdefault(actor.actor_id, actor.public())
+        data = dict(data)
+        # the GENESIS link commits to the subject (product/lot/weight) inside its
+        # SIGNED body, so the human-facing asset identity a certificate displays —
+        # and register_rwa titles the asset with — is bound to the chain and can't
+        # be relabeled (counterfeit "Kobe A5" swap) without breaking a signature.
+        if not self.events:
+            data["_subject_commit"] = sha256_hex(canonical_json(self.subject))
         ev = PassportEvent(
             seq=len(self.events),
             ts=ts or now_iso(),
@@ -203,6 +210,17 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
         prev = ev["hash"]
         roles_seen.append(rec.get("role", who))
 
+    # subject binding: the genesis link committed to the subject inside its signed
+    # body (all signatures verified above), so a relabeled top-level `subject`
+    # (counterfeit product/lot/weight) no longer matches and is rejected.
+    commit = (events[0].get("data") or {}).get("_subject_commit")
+    if commit is None:
+        return False, notes + ["genesis link does not commit to the subject "
+                               "(unbound provenance — cannot trust the asset identity)"]
+    if commit != sha256_hex(canonical_json(passport.get("subject", {}))):
+        return False, notes + ["subject doesn't match the signed genesis commitment "
+                               "(product/lot/weight relabeled)"]
+
     # settlement conservation, if a sale was recorded
     sale = next((e for e in events if e["type"] == "SALE"), None)
     if sale:
@@ -219,6 +237,13 @@ def verify_passport(passport: dict) -> tuple[bool, list[str]]:
         # the certificate's `split` advertises the rancher's cut (the money and the
         # displayed split disagree). Re-derive from the signed split and compare.
         split_payees = (sale["data"].get("split") or {}).get("payees", [])
+        # the split must actually allocate 100% — otherwise the integer-floor
+        # residue rule (meant only for rounding cents) silently dumps the entire
+        # unallocated shortfall onto the first payee while the per-payee bps read
+        # as an honest split (self-dealing under an even-looking certificate).
+        if split_payees and sum(p["bps"] for p in split_payees) != 10_000:
+            return False, notes + ["SALE split bps don't sum to 10000 "
+                                   "(shortfall would misroute to the first payee)"]
         exp, dist = [], 0
         for p in split_payees:
             amt = (price * p["bps"]) // 10_000

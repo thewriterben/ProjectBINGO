@@ -47,7 +47,8 @@ def simulate(delivering: str = "booked", damage: bool = False) -> dict:
               ts="2026-08-05T09:20:00Z")
     dmg = ["passenger door: 3in scuff"] if damage else []
     dcond = condition(12995, damage=dmg, photos_sha256="b2" * 16)
-    acc = make_acceptance(cust, vin=VIN, cond=dcond, ts="2026-08-07T14:05:00Z")
+    acc = make_acceptance(cust, vin=VIN, cond=dcond,
+                          booking_hash=pp.events[0]["hash"], ts="2026-08-07T14:05:00Z")
     pp.deliver(carrier, acc, dcond, "Sun Valley, ID", ts="2026-08-07T14:10:00Z")
 
     d = pp.to_dict()

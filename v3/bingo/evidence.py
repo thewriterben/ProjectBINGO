@@ -99,7 +99,7 @@ def verify(evidence: dict, expected_pubkey_hex: str | None = None) -> tuple[bool
     ja = next((e for e in events if e["type"] == "JOB_ACCEPTED"), None)
     if ja and "job_id" in ja.get("data", {}):
         jd = ja["data"]
-        for k in ("job_id", "order_id", "asset_id", "qty", "royalty_assets"):
+        for k in ("job_id", "order_id", "asset_id", "node_id", "qty", "royalty_assets"):
             if k in jd and evidence.get(k) != jd[k]:
                 return False, notes + [f"top-level {k} != signed JOB_ACCEPTED "
                                        f"(job identity forged/relabeled)"]

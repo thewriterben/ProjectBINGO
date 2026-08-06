@@ -57,14 +57,22 @@ def damage_delta(pickup_cond: dict, delivery_cond: dict) -> list[str]:
 
 def _acceptance_body(r: dict) -> bytes:
     return canonical_json({k: r[k] for k in
-                           ("passport_subject_vin", "customer", "condition", "ts")})
+                           ("passport_subject_vin", "customer", "condition",
+                            "booking_hash", "ts")})
 
 
-def make_acceptance(customer: Actor, *, vin: str, cond: dict, ts: str) -> dict:
+def make_acceptance(customer: Actor, *, vin: str, cond: dict, booking_hash: str,
+                    ts: str) -> dict:
     """The customer's signed acceptance of the vehicle at delivery, in the
-    condition recorded. Co-signs the DELIVERY so a middleman can't fake receipt."""
+    condition recorded. Co-signs the DELIVERY so a middleman can't fake receipt.
+
+    `booking_hash` pins the acceptance to THIS specific broker-signed BOOKING
+    (its event hash). Without it, a genuine acceptance signed for one load could
+    be replayed verbatim onto a different booking (different carrier/amount) that
+    the customer never actually accepted, or an outsider could self-sign a booking
+    and reuse a customer's public acceptance to settle to their own account."""
     r = {"passport_subject_vin": vin, "customer": customer.actor_id,
-         "condition": cond, "ts": ts}
+         "condition": cond, "booking_hash": booking_hash, "ts": ts}
     r["sig"] = customer.sign(_acceptance_body(r))
     r["pubkey"] = customer.pubkey_hex
     return r
@@ -238,6 +246,18 @@ def verify_transport(pp: dict) -> tuple[bool, list[str]]:
                 return False, notes + [f"event {ev['seq']}: acceptance not signed properly"]
             if acc.get("passport_subject_vin") != pp["subject"].get("vin"):
                 return False, notes + [f"event {ev['seq']}: acceptance is for a different vehicle"]
+            # the acceptance must be bound to THIS booking (kills replay of a
+            # genuine acceptance onto a different carrier/amount, and an outsider
+            # self-signing a booking to reuse a public acceptance)
+            if acc.get("booking_hash") != events[0]["hash"]:
+                return False, notes + [f"event {ev['seq']}: acceptance not bound to "
+                                       f"this booking (stale/replayed acceptance)"]
+            # the carrier-signed delivery condition must equal the condition the
+            # customer actually co-signed — otherwise a carrier stamps a clean
+            # condition while the customer attested damage, suppressing the claim
+            if acc.get("condition") != ev["data"].get("condition"):
+                return False, notes + [f"event {ev['seq']}: delivery condition does not "
+                                       f"match the customer-accepted condition"]
 
     notes.append(f"{len(events)} custody links; carrier identity bound at booking "
                  f"held through {'delivery' if saw_delivery else 'pickup' if saw_pickup else 'booking'}")

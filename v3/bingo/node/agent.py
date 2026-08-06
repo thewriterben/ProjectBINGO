@@ -63,7 +63,7 @@ class NodeAgent:
         # Job (or another node's events spliced under a different job) must fail
         ja = next((e for e in job.evidence if e.type == "JOB_ACCEPTED"), None)
         if ja and "job_id" in ja.data:
-            for attr in ("job_id", "order_id", "asset_id", "qty"):
+            for attr in ("job_id", "order_id", "asset_id", "node_id", "qty"):
                 if attr in ja.data and getattr(job, attr) != ja.data[attr]:
                     return False
             if "royalty_assets" in ja.data and \

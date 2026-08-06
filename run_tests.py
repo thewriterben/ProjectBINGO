@@ -41,6 +41,7 @@ SUITE = [
     ("architecture thesis (one-kernel conformance)", "tests.test_kernel_thesis", V3),
     ("red-team regressions (19 confirmed breaks, all fixed)", "tests.test_redteam_regressions", V3),
     ("red-team round-2 regressions (15 confirmed breaks, all fixed)", "tests.test_redteam_r2_regressions", V3),
+    ("red-team round-3 regressions (9 confirmed breaks, all fixed)", "tests.test_redteam_r3_regressions", V3),
     ("sentinel classifier", "sentinel.test_sentinel", ROOT),
 ]
 

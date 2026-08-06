@@ -144,7 +144,8 @@ def _delivered_transport():
     pp = booked(broker, bound, cust)
     pp.pickup(bound, condition(12340), location="AZ", ts="t1")
     vin = subject()["vin"] if isinstance(subject(), dict) else pp.subject.get("vin")
-    acc = make_acceptance(cust, vin=pp.subject["vin"], cond=condition(12995), ts="t2")
+    acc = make_acceptance(cust, vin=pp.subject["vin"], cond=condition(12995),
+                          booking_hash=pp.events[0]["hash"], ts="t2")
     pp.deliver(bound, acc, condition(12995), location="ID", ts="t3")
     return pp, ghost
 
