@@ -24,6 +24,7 @@ SUITE = [
     ("reputation", "tests.test_reputation", V3),
     ("persisted evidence + verifier", "tests.test_verifier", V3),
     ("settlement adapter", "tests.test_settlement_adapter", V3),
+    ("payout execution (idempotent money movement)", "tests.test_payout", V3),
     ("creator earnings", "tests.test_earnings", V3),
     ("training-material royalties", "tests.test_training", V3),
     ("provenance passport (RWA)", "tests.test_passport", V3),

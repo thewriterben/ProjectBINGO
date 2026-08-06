@@ -130,10 +130,12 @@ securities offering. Demo: `python -m provenance.machine_rwa_demo`. Code:
 
 ## Status
 
-All seven verticals run as stdlib Python, **22/22 test suites** (`python
+All seven verticals run as stdlib Python, **23/23 test suites** (`python
 run_tests.py`) — including a one-kernel conformance suite that machine-checks the
-thesis itself, and a fail-closed raise-readiness gate for the machine-RWA
-vertical (`provenance/raise_readiness.py`) — committed. Passports, tokens, coins,
+thesis itself, a fail-closed raise-readiness gate for the machine-RWA vertical
+(`provenance/raise_readiness.py`), and an idempotent, crash-safe, reconciled
+payout-execution layer (`bingo/payout.py`) that drives a real Stripe/stablecoin
+rail without ever double-paying — committed. Passports, tokens, coins,
 bills-of-lading, training corpora, and machine-share instruments verify from the
 document alone. These are
 working prototypes; real launches need production keys, hosting, and money-rail
