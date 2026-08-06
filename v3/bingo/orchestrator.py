@@ -122,7 +122,8 @@ class Orchestrator:
                       royalty_lines=lines,
                       fee_cents=jq.fee_cents,
                       grade=grade.value, checklist_hash=cl_hash)
-            assert job.royalty_cents == jq.royalty_cents, "royalty lines must sum to quoted royalty"
+            if job.royalty_cents != jq.royalty_cents:   # not an assert: -O must not strip it
+                raise ValueError("royalty lines must sum to quoted royalty")
             order.jobs.append(job)
 
         self.orders[order.order_id] = order
@@ -162,8 +163,11 @@ class Orchestrator:
                          else "carrier:usps-webhook")
             agent.confirm_delivery(job, confirmer=confirmer)
 
-            assert NodeAgent.verify_chain(job, agent.public_key_hex), \
-                "PoF chain signature verification failed"
+            # the PoF settlement gate — an `if/raise`, NOT an assert, so that
+            # `python -O` (which strips asserts) can never compile the money gate
+            # out and settle tampered/forged evidence
+            if not NodeAgent.verify_chain(job, agent.public_key_hex):
+                raise ValueError("PoF chain signature verification failed — refusing to settle")
             receipt = self.ledger.settle_job(order, job)
             job.state = JobState.SETTLED
             settled.append(job)

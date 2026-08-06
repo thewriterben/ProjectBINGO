@@ -148,7 +148,8 @@ class CutPassport:
         residue = price_cents - distributed
         if legs and residue:
             legs[0]["cents"] += residue
-        assert sum(l["cents"] for l in legs) == price_cents
+        if price_cents < 0 or sum(l["cents"] for l in legs) != price_cents:
+            raise ValueError("sale price must be non-negative and legs must conserve it")
         self.settlement = legs
         self.attest(seller, "SALE", {
             "buyer": buyer, "unit": unit, "price_cents": price_cents,
@@ -246,6 +247,11 @@ def _verify_passport(passport: dict) -> tuple[bool, list[str]]:
     sales = [e for e in events if e["type"] == "SALE"]
     for sale in sales:
         price = sale["data"]["price_cents"]
+        # price must be a non-negative int — a negative price with negative legs
+        # "conserves" (sum == price) but injects never-paid negative settlement
+        # legs that poison downstream earnings rollups
+        if not isinstance(price, int) or price < 0:
+            return False, notes + [f"SALE seq {sale['seq']}: price must be a non-negative integer"]
         # conserve against the SIGNED legs inside the SALE event — NOT the
         # unsigned top-level `settlement` field, which an attacker can rewrite to
         # reroute the money while keeping the total intact.

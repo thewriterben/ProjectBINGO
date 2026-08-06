@@ -202,6 +202,12 @@ class RedemptionRegistry:
         self.postings: dict[str, dict] = {}     # serial -> backend posting status (unsigned)
         if store_path and os.path.exists(store_path):
             self._load()
+        elif self.anchor_path and os.path.exists(self.anchor_path):
+            # an anti-rollback anchor with NO store file means the ledger was
+            # deleted out from under it — starting fresh here would re-redeem every
+            # spent coin. Refuse: a present anchor must have its store.
+            raise CoinError("redemption ledger missing but its anti-rollback anchor "
+                            "exists (store deleted → rollback)")
 
     def _load(self):
         with open(self.store_path) as f:

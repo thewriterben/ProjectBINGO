@@ -256,10 +256,13 @@ def _verify_transport(pp: dict) -> tuple[bool, list[str]]:
             _cond = ev["data"].get("condition")
             if not isinstance(_cond, dict):
                 return False, notes + [f"event {ev['seq']}: {t} condition missing/invalid"]
-            # damage must be a list — escrow_decision's damage_delta iterates it;
-            # a non-list (e.g. an int) verifies here then crashes settlement
-            if not isinstance(_cond.get("damage", []), list):
-                return False, notes + [f"event {ev['seq']}: {t} condition 'damage' must be a list"]
+            # damage must be a list OF STRINGS — escrow_decision's damage_delta
+            # sets/sorts it; a non-list, or a list with non-string (or mixed-type)
+            # elements, verifies here then crashes settlement on sorted()
+            _dmg = _cond.get("damage", [])
+            if not isinstance(_dmg, list) or not all(isinstance(x, str) for x in _dmg):
+                return False, notes + [f"event {ev['seq']}: {t} condition 'damage' "
+                                       f"must be a list of strings"]
         if t == "PICKUP":
             saw_pickup = True
         if t == "DELIVERY":

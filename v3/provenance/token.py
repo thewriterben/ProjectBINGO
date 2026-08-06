@@ -344,7 +344,17 @@ def verify_token(token: dict, backing_passport: dict | None = None) -> tuple[boo
     """Independently verify a token from the document alone: signed hash-chain
     integrity, replayed balances (no overdraft, correct authorization), and
     supply conservation. If the backing passport is supplied, also confirm the
-    token is pinned to that exact, verified provenance."""
+    token is pinned to that exact, verified provenance.
+
+    Fails CLOSED on any malformed/adversarial document: a third party runs this on
+    untrusted JSON, so a missing field or wrong type is a rejection, not a crash."""
+    try:
+        return _verify_token(token, backing_passport)
+    except Exception as e:
+        return False, [f"malformed token document: {type(e).__name__}: {e}"]
+
+
+def _verify_token(token: dict, backing_passport: dict | None = None) -> tuple[bool, list[str]]:
     from .passport import verify_passport
 
     notes: list[str] = []
