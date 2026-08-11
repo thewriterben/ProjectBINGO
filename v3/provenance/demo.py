@@ -25,14 +25,14 @@ OUT = os.path.join(os.path.dirname(__file__), "..", "out", "passport")
 
 def build() -> CutPassport:
     # --- the people (real keys; placeholder identities) --------------------
-    op = Actor.create("dgd-wagyu", "DGD Wagyu Co.", "operation", "acct:op:dgd-wagyu")
-    rancher = Actor.create("sadu-farms", "SADU Farms — 3rd-generation",
+    op = Actor.for_testing("dgd-wagyu", "DGD Wagyu Co.", "operation", "acct:op:dgd-wagyu")
+    rancher = Actor.for_testing("sadu-farms", "SADU Farms — 3rd-generation",
                            "rancher", "acct:rancher:sadu")
-    proc = Actor.create("wood-river", "Wood River Processing", "processor",
+    proc = Actor.for_testing("wood-river", "Wood River Processing", "processor",
                         "acct:processor:wood-river")
-    carrier = Actor.create("sawtooth-cc", "Sawtooth Cold Chain", "carrier",
+    carrier = Actor.for_testing("sawtooth-cc", "Sawtooth Cold Chain", "carrier",
                            "acct:carrier:sawtooth")
-    grocer = Actor.create("sun-valley-mkt", "Sun Valley Market", "grocer",
+    grocer = Actor.for_testing("sun-valley-mkt", "Sun Valley Market", "grocer",
                           "acct:grocer:sun-valley")
 
     lot = "SV-A5-2026-0731-017"

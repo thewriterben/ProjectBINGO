@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import crypto
+from . import crypto, keys
 from .models import SplitPayee, canonical_json, sha256_hex
 
 
@@ -57,18 +57,36 @@ class Trainer:
     account: str
     _seed: bytes = b""
     _pub: bytes = b""
+    _signer: object = None         # bingo.keys.Signer, when custody is external
 
     @classmethod
-    def create(cls, trainer_id: str, account: str, seed: bytes | None = None) -> "Trainer":
-        seed = seed if seed is not None else (trainer_id.encode() + b"\x00" * 32)[:32]
+    def create(cls, trainer_id: str, account: str, seed: bytes | None = None,
+               signer=None) -> "Trainer":
+        """Mint a trainer. No key given => a real random key.
+
+        Never derive the key from `trainer_id`: it is published in the corpus, so
+        a derived key is one any reader can recompute and sign with. Use
+        `for_testing()` for reproducible fixtures, or pass `signer=` to keep the
+        private key in a keystore/HSM instead of this object."""
+        if signer is not None:
+            return cls(trainer_id, account, b"", signer.public_key(), signer)
+        seed = seed if seed is not None else keys.new_seed()
         sk, pk = crypto.keypair(seed)
         return cls(trainer_id, account, sk, pk)
+
+    @classmethod
+    def for_testing(cls, trainer_id: str, account: str) -> "Trainer":
+        """Reproducible, deliberately FORGEABLE trainer - fixtures only."""
+        return cls.create(trainer_id, account,
+                          seed=keys.insecure_test_signer(trainer_id).export_seed())
 
     @property
     def pubkey_hex(self) -> str:
         return self._pub.hex()
 
     def sign(self, message: bytes) -> str:
+        if self._signer is not None:
+            return self._signer.sign(message).hex()
         return crypto.sign(message, self._seed, self._pub).hex()
 
 

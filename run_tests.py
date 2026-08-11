@@ -18,6 +18,7 @@ V3 = os.path.join(ROOT, "v3")
 # (label, module, cwd)
 SUITE = [
     ("ed25519 self-test", "bingo.crypto", V3),
+    ("key custody: generation, at-rest, rotation/revocation/recovery", "tests.test_key_custody", V3),
     ("thin-vertical demo", "bingo.demo.run", V3),
     ("multi-asset royalty", "tests.test_multi_royalty", V3),
     ("acceptance grades", "tests.test_grades", V3),

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from bingo import crypto
+from bingo import crypto, keys
 from bingo.models import Split, SplitPayee, canonical_json, now_iso, sha256_hex
 
 SCHEMA = "bingo/passport/0.1"
@@ -39,8 +39,20 @@ ZERO = "0" * 64
 class Actor:
     """A party who can attest to a link in the chain, with a signing key.
 
-    In production the seed is an actor's private key held in their own wallet;
-    here we derive a deterministic keypair so demos and tests are reproducible.
+    This is the identity primitive for EVERY provenance vertical - passport,
+    token, transport, coin, machine-RWA all build their signers from it - so its
+    default behaviour is load-bearing for the whole stack.
+
+    `create()` with no key mints a fresh CSPRNG key (`keys.new_seed()`). It must
+    never derive one from `actor_id` or any other published value: `actor_id`
+    appears in the clear as the `signer` of every event in every shipped
+    document, so a key derived from it is a key that anyone who reads the
+    document can recompute. (It did exactly that until 2026-08-11; see
+    `specs/KEY-CUSTODY.md`.) For reproducible fixtures use `for_testing()`,
+    which is deliberately loud about being forgeable.
+
+    Pass `signer=` to sign through custody you control - an encrypted keystore or
+    an HSM/KMS - in which case this object never holds the private key at all.
     """
     actor_id: str
     name: str
@@ -48,19 +60,37 @@ class Actor:
     account: str                   # settlement account the money routes to
     _seed: bytes = b""
     _pub: bytes = b""
+    _signer: object = None         # bingo.keys.Signer, when custody is external
 
     @classmethod
     def create(cls, actor_id: str, name: str, role: str, account: str,
-               seed: bytes | None = None) -> "Actor":
-        seed = seed if seed is not None else (actor_id.encode() + b"\x00" * 32)[:32]
+               seed: bytes | None = None, signer=None) -> "Actor":
+        """Mint an actor. No key given => a real random key, never a derived one."""
+        if signer is not None:
+            return cls(actor_id, name, role, account, b"", signer.public_key(), signer)
+        seed = seed if seed is not None else keys.new_seed()
         sk, pk = crypto.keypair(seed)
         return cls(actor_id, name, role, account, sk, pk)
+
+    @classmethod
+    def for_testing(cls, actor_id: str, name: str, role: str,
+                    account: str) -> "Actor":
+        """A reproducible actor for tests and demos.
+
+        **Forgeable on purpose**: the key is derived from `actor_id`, so anyone
+        holding a document signed this way can recompute the private key. Never
+        use it where real value moves - that is what `create()` is for.
+        """
+        return cls.create(actor_id, name, role, account,
+                          seed=keys.insecure_test_signer(actor_id).export_seed())
 
     @property
     def pubkey_hex(self) -> str:
         return self._pub.hex()
 
     def sign(self, message: bytes) -> str:
+        if self._signer is not None:               # custody holds the key, not us
+            return self._signer.sign(message).hex()
         return crypto.sign(message, self._seed, self._pub).hex()
 
     def public(self) -> dict:

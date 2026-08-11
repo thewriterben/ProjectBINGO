@@ -44,7 +44,7 @@ def test_conservation_and_inputs():          # #1, #2, #17, #18
     except TokenError:
         pass
     # a no-split token can't do a primary sale silently (proceeds would vanish)
-    iss = Actor.create("iss", "Iss", "issuer", "acct:iss")
+    iss = Actor.for_testing("iss", "Iss", "issuer", "acct:iss")
     tok = AssetToken(backing_asset_id="a", passport_head="0" * 64, unit="u",
                      total_supply=10, issuer=iss, value_split=[], ts="t0")
     try:
@@ -88,8 +88,8 @@ def test_passport_unsigned_settlement():      # #8 (critical)
 
 
 def test_coin_unsigned_postings_injection():  # #3, #6, #13 (critical)
-    dgd = Actor.create("dgd", "DGD", "issuer", "acct:dgd")
-    val = Actor.create("val", "Validator", "validator", "acct:val")
+    dgd = Actor.for_testing("dgd", "DGD", "issuer", "acct:dgd")
+    val = Actor.for_testing("val", "Validator", "validator", "acct:val")
     coin = mint_coin(dgd, serial="DGD-1", passport_head="a" * 64, credit_cents=2500)
     d = tempfile.mkdtemp(); path = os.path.join(d, "store.json")
     try:
@@ -111,8 +111,8 @@ def test_coin_unsigned_postings_injection():  # #3, #6, #13 (critical)
 
 
 def test_coin_no_double_credit_on_status_flip():  # #14
-    dgd = Actor.create("dgd", "DGD", "issuer", "acct:dgd")
-    val = Actor.create("val", "Validator", "validator", "acct:val")
+    dgd = Actor.for_testing("dgd", "DGD", "issuer", "acct:dgd")
+    val = Actor.for_testing("val", "Validator", "validator", "acct:val")
     coin = mint_coin(dgd, serial="DGD-2", passport_head="b" * 64, credit_cents=2500)
     d = tempfile.mkdtemp(); path = os.path.join(d, "store.json")
     try:
@@ -158,7 +158,7 @@ def test_machine_rwa_no_fragment_starvation():  # #16
 
 def _token_with_passport(fulfiller=None):
     pp = build_passport().to_dict()
-    iss = Actor.create("iss", "Iss", "issuer", "acct:iss")
+    iss = Actor.for_testing("iss", "Iss", "issuer", "acct:iss")
     tok = AssetToken(backing_asset_id="wagyu", passport_head=pp["chain_head"],
                      unit="cut", total_supply=10, issuer=iss,
                      value_split=[{"account": "acct:iss", "bps": 10000}],
@@ -179,7 +179,7 @@ def test_token_passport_pin_and_balances():    # #10, #12
 
 
 def test_token_receipt_reuse_and_anchor():     # #5, #11
-    ful = Actor.create("ful", "Grocer", "grocer", "acct:ful")
+    ful = Actor.for_testing("ful", "Grocer", "grocer", "acct:ful")
     pp, iss, tok = _token_with_passport(fulfiller=ful)
     custody = next(e["hash"] for e in pp["events"] if e["type"] == "CUSTODY")
     # #5 one signed delivery of 5 units can't redeem 10 shares across two redeems
