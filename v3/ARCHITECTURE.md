@@ -130,12 +130,15 @@ securities offering. Demo: `python -m provenance.machine_rwa_demo`. Code:
 
 ## Status
 
-All seven verticals run as stdlib Python, **32/32 test suites** (`python
+All seven verticals run as stdlib Python, **33/33 test suites** (`python
 run_tests.py`) — including a one-kernel conformance suite that machine-checks the
 thesis itself, a fail-closed raise-readiness gate for the machine-RWA vertical
 (`provenance/raise_readiness.py`), an idempotent, crash-safe, reconciled
-payout-execution layer (`bingo/payout.py`) that drives a real Stripe/stablecoin
-rail without ever double-paying, and nine red-team regression suites pinning 70
+payout-execution layer (`bingo/payout.py`) whose `StripeConnectRail` is a **real**
+rail (Stripe Transfers REST API over stdlib `urllib`, native idempotency key) —
+proven end-to-end with no live credentials against a faithful local Stripe double
+(`bingo/demo/fake_stripe.py`) incl. external reconciliation against the provider's
+own records, so the flip to live money is just credentials — and nine red-team regression suites pinning 70
 adversary-found breaks closed across nine rounds (see `claude/REDTEAM-FINDINGS.md`
 and `-R2`…`-R9`; the round-by-round confirmed count fell 19→15→9→7→11→5→2→1→1 as
 the kernel converged, with 6 of 7 surfaces clean in each of the last three rounds)
