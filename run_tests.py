@@ -25,6 +25,7 @@ SUITE = [
     ("persisted evidence + verifier", "tests.test_verifier", V3),
     ("settlement adapter", "tests.test_settlement_adapter", V3),
     ("payout execution (idempotent money movement)", "tests.test_payout", V3),
+    ("real stripe rail end-to-end (faithful local double)", "tests.test_payout_stripe", V3),
     ("creator earnings", "tests.test_earnings", V3),
     ("training-material royalties", "tests.test_training", V3),
     ("provenance passport (RWA)", "tests.test_passport", V3),
