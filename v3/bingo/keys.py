@@ -26,6 +26,16 @@ The design has three pieces:
     reading a document handed you the signer's private key. See
     `specs/KEY-CUSTODY.md`.)
 
+  * **The signing path itself.** Pure-Python big-integer math is variable-time,
+    so the stdlib signer leaks key material through timing and cannot be fixed in
+    place. `AuditedSigner` signs through an audited constant-time library when one
+    is installed, producing **byte-identical** signatures (RFC 8032 is
+    deterministic, so that is checked, not assumed); `best_local_signer()` picks it
+    automatically and the keystores hand it out. Verification deliberately stays
+    pure-Python everywhere - it takes only public inputs, so it has no secret to
+    leak, and keeping it dependency-free is what makes "a stranger can verify this
+    document with nothing installed" true.
+
 Rotation, revocation and recovery live in `bingo/keydir.py` - they need a signed,
 verifiable *record*, not just a place to put bytes.
 
@@ -111,8 +121,21 @@ class Signer(ABC):
 
 
 class LocalSigner(Signer):
-    """Holds the seed in process memory. Fine for a node that controls its own
-    machine; the key is exposed to anything that can read this process."""
+    """Signs with the pure-Python kernel. Holds the seed in process memory.
+
+    **Side-channel warning.** `bingo/crypto.py` is a correct RFC 8032
+    implementation, but Python's big-integer arithmetic is variable-time by
+    construction - execution time depends on the secret scalar - so this signing
+    path leaks key material to an attacker who can measure it, and no amount of
+    care inside pure Python fixes that. Use `best_local_signer()`, which picks
+    `AuditedSigner` when an audited constant-time library is installed and only
+    falls back to this when it is not.
+
+    Note the asymmetry that makes the fallback tolerable: **verification** takes
+    only public inputs (message, signature, public key), so its timing leaks
+    nothing. The stdlib verifier stays the reference implementation forever -
+    that is what keeps "a stranger can verify with zero dependencies" true.
+    """
 
     def __init__(self, seed: bytes, identity: str = ""):
         if not isinstance(seed, (bytes, bytearray)) or len(seed) != 32:
@@ -142,6 +165,90 @@ class LocalSigner(Signer):
 
     def __repr__(self) -> str:                      # never print the seed
         return f"LocalSigner(identity={self._identity!r}, pub={self._pub.hex()[:16]}...)"
+
+
+try:                                            # optional, audited, constant-time
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey as _Ed25519PrivateKey)
+    HAS_AUDITED_SIGNING = True
+except Exception:                               # pragma: no cover - env-dependent
+    _Ed25519PrivateKey = None
+    HAS_AUDITED_SIGNING = False
+
+
+class AuditedSigner(Signer):
+    """Signs via an audited, constant-time Ed25519 implementation.
+
+    Same seed, same public key, **byte-identical signatures** - RFC 8032 is
+    deterministic, so this is a checkable property rather than a hope, and
+    `tests/test_signing_path.py` checks it across random seeds and messages. That
+    is what makes this a true drop-in: documents signed here verify under the
+    stdlib verifier and vice versa, so nothing downstream can tell the
+    difference, and the kernel's zero-dependency verification story is untouched.
+
+    Only the SIGNING path moves. Verification stays pure-Python everywhere,
+    because it has no secret to leak.
+    """
+
+    def __init__(self, seed: bytes, identity: str = ""):
+        if not HAS_AUDITED_SIGNING:
+            raise RuntimeError(
+                "no audited Ed25519 implementation available (pip install "
+                "cryptography) - refusing to pretend this path is constant-time")
+        if not isinstance(seed, (bytes, bytearray)) or len(seed) != 32:
+            raise ValueError("seed must be exactly 32 bytes")
+        self._key = _Ed25519PrivateKey.from_private_bytes(bytes(seed))
+        self._seed = bytes(seed)
+        # derive the public key through the audited library too. `crypto.publickey`
+        # would give the identical answer (asserted in tests), but it is pure-Python
+        # scalar multiplication *on the secret seed* - i.e. a second variable-time
+        # operation on secret material. The whole point of this class is that no
+        # secret-dependent pure-Python math runs at all.
+        self._pub = self._key.public_key().public_bytes_raw()
+        self._identity = identity
+
+    @property
+    def identity(self) -> str:
+        return self._identity
+
+    def public_key(self) -> bytes:
+        return self._pub
+
+    def sign(self, message: bytes) -> bytes:
+        return self._key.sign(message)
+
+    def export_seed(self) -> bytes:
+        return self._seed
+
+    def __repr__(self) -> str:                  # never print the seed
+        return f"AuditedSigner(identity={self._identity!r}, pub={self._pub.hex()[:16]}...)"
+
+
+def best_local_signer(seed: bytes, identity: str = "") -> Signer:
+    """The safest local signer available: audited/constant-time when installed,
+    pure-Python otherwise.
+
+    Deliberately silent about which it picked - callers that need to KNOW (an
+    operator deciding whether this host may hold real value) should check
+    `HAS_AUDITED_SIGNING` explicitly rather than infer it, and
+    `signing_path_report()` says it in one line.
+    """
+    if HAS_AUDITED_SIGNING:
+        return AuditedSigner(seed, identity)
+    return LocalSigner(seed, identity)
+
+
+def signing_path_report() -> dict:
+    """What an operator needs to know before trusting this host with a key."""
+    return {
+        "audited_constant_time_signing": HAS_AUDITED_SIGNING,
+        "verification": "pure-Python (public inputs only; no secret to leak)",
+        "note": ("signing is constant-time via an audited library"
+                 if HAS_AUDITED_SIGNING else
+                 "signing is pure-Python and VARIABLE-TIME: exposed to timing "
+                 "side-channels. Install `cryptography`, or sign in an HSM/KMS, "
+                 "before this key holds real value."),
+    }
 
 
 class ExternalKmsSigner(Signer):
@@ -307,7 +414,7 @@ class EncryptedFileKeyStore(KeyStore):
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(envelope, f, indent=2)
         os.replace(tmp, path)
-        return LocalSigner(seed, identity)
+        return best_local_signer(seed, identity)
 
     def signer(self, identity: str) -> Signer:
         path = self._path(identity)
@@ -319,7 +426,7 @@ class EncryptedFileKeyStore(KeyStore):
             envelope = json.load(f)
         seed = decrypt_seed(envelope, self._passphrase)     # raises on wrong pass
         stored_pub = envelope.get("public_key_hex")
-        signer = LocalSigner(seed, identity)
+        signer = best_local_signer(seed, identity)   # audited path when available
         if stored_pub and stored_pub != signer.public_key_hex:
             raise ValueError(
                 "key file public key does not match the decrypted seed - refusing")
@@ -349,7 +456,7 @@ class EnvKeyStore(KeyStore):
             seed = bytes.fromhex(raw.strip())
         except ValueError:
             raise ValueError(f"${self._var(identity)} is not valid hex") from None
-        return LocalSigner(seed, identity)
+        return best_local_signer(seed, identity)
 
 
 # -- test fixtures (explicit, never a default) ---------------------------------

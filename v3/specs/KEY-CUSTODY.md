@@ -76,6 +76,45 @@ forecloses that option, which is why `Actor` and `Trainer` now accept `signer=`.
 `ExternalKmsSigner` is the fail-closed seam for real hardware: unconfigured, it
 refuses to sign rather than falling back to something weaker.
 
+### 1b. The signing path itself
+
+A seam is only worth as much as what sits behind it. `bingo/crypto.py` is a
+correct RFC 8032 Ed25519, but **Python big-integer arithmetic is variable-time by
+construction** - how long it runs depends on the secret scalar - so the
+pure-Python *signing* path leaks key material to anyone who can measure it, and
+nothing written in pure Python fixes that.
+
+The asymmetry that makes this tractable:
+
+| | input | leaks? | implementation |
+|---|---|---|---|
+| **signing** | the private key | yes, via timing | audited constant-time library, when installed |
+| **verification** | message, signature, public key - all public | nothing to leak | pure-Python, always |
+
+`AuditedSigner` signs through `cryptography`'s Ed25519 when it is available, and
+`best_local_signer()` picks it automatically - both keystores hand it out, so a
+node that has the library never signs in pure Python by accident. It also derives
+the *public key* through the audited library, because `crypto.publickey()` is a
+second variable-time operation **on the secret seed**; the point is that no
+secret-dependent pure-Python math runs at all.
+
+The drop-in claim is checkable rather than hopeful: RFC 8032 signatures are
+deterministic, so the two implementations must produce **byte-identical** output
+for the same seed and message. `tests/test_signing_path.py` checks that over 150
+random seeds/messages, checks the public keys agree, and cross-verifies in both
+directions. Measured on the cloud host: ~4 ms/op pure-Python vs ~38 us/op audited,
+about 105x - the security fix is also the performance fix.
+
+Without the library, `AuditedSigner` **refuses to construct** rather than silently
+degrading; the equivalence checks *skip and say so*, because a skipped check must
+never read as a passed one. `signing_path_report()` states in one line whether
+this host is safe to hold a real key. Note that the reference node's own machine
+does **not** currently have the library, so it is signing in pure Python today.
+
+Verification stays pure-Python everywhere and always. That is deliberate: it is
+what keeps "a stranger can verify this document with nothing installed" true, and
+it costs nothing, because there is no secret in it.
+
 ### 2. `KeyStore` - custody at rest
 
 | Backend | Use | Exposure |
