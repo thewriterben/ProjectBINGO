@@ -49,6 +49,18 @@ different index), consistency proofs for **every** `(old, new)` pair in that
 range, plus 200 randomized rewrite attempts that must all fail to prove
 consistent. See `tests/test_anchor.py`.
 
+## Monotonicity: `AnchorService`
+
+A bare log proves *a* statement was logged. A party guarding against **rollback**
+needs the opposite question answered - *"what is the LATEST thing anchored under
+this key?"* Without that, an attacker who rolls a ledger back to an earlier state
+presents the earlier state's perfectly genuine receipt and every proof checks out.
+
+`AnchorService` is the operator-side index that answers it: `anchor(key, payload)`
+and `receipt(key)` for the most recent one. It is not a trust addition - everything
+it returns is still backed by an inclusion proof against a signed head - it just
+supplies the ordering fact the disk-owner cannot supply about themselves.
+
 ## Witnesses: what consistency proofs do not fix
 
 Consistency proofs let anyone *who saw an earlier head* detect a rewrite. They do
@@ -97,11 +109,16 @@ and buy nothing extra here.
 
 ## Still open
 
-- **The coin rollback limitation is not yet wired up.** The primitive it was
-  missing now exists - `provenance/coin.py` should anchor its ledger head so
-  truncation is caught by a consistency proof instead of a local sidecar an
-  attacker can rewrite. That is the obvious next step and the reason this was
-  built first.
+- ~~**The coin rollback limitation is not yet wired up.**~~ **DONE.**
+  `provenance/coin.py` now takes an optional `anchor_service`; when one is
+  configured it is **authoritative over the local sidecar** and the check is
+  required, not advisory (a missing log key or an unverifiable receipt refuses
+  the load rather than degrading to "unanchored"). `tests/test_coin_anchor.py`
+  runs the exact attack the module docstring used to concede - truncate the
+  signed ledger *and* rewrite `<store>.anchor` so it agrees - **twice**: once
+  without a log, where it succeeds and the coin is spent again, and once with,
+  where it is refused. Truncation to a legitimately-signed shorter *prefix* (the
+  version where nothing on disk looks forged at all) is caught the same way.
 - **No log operator is deployed.** `TransparencyLog` runs in-process; production
   needs someone to actually run it, publish heads, and serve proofs - plus real
   independent witnesses, which is an organizational problem more than a technical

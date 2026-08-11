@@ -183,25 +183,48 @@ class RedemptionRegistry:
       * loading a TAMPERED ledger fails closed: mutation/forgery is caught by the
         validator signatures + hash chain, and *truncation/rollback* (deleting the
         trailing POSTED, or emptying the chain — a valid signed prefix is still a
-        valid signed chain) is caught by a sidecar anti-rollback anchor that pins
-        the last head+length. If an attacker can rewrite the anchor too, the
-        backend's serial-keyed idempotency (see ValidationBackend) still prevents a
-        real double-credit.
+        valid signed chain) is caught by an anti-rollback anchor pinning the last
+        head+length.
+      * that anchor comes in two strengths. The **local sidecar** (`<store>.anchor`)
+        is free and catches an attacker who edits only the ledger — but an attacker
+        who owns the disk rewrites the sidecar too, and this class used to concede
+        exactly that. Pass an **`anchor_service`** (`bingo.anchor.AnchorService`)
+        and the last head is additionally pinned in an external append-only
+        transparency log: the authority for "how long was this ledger?" moves to a
+        party the disk-owner does not control, and the concession goes away. When a
+        service is configured the check is REQUIRED, not advisory — a missing or
+        unverifiable receipt refuses the load rather than falling back.
     """
 
     def __init__(self, validator: Actor, trusted_issuer_pubkey: str,
-                 store_path: str | None = None, backend: "ValidationBackend | None" = None):
+                 store_path: str | None = None, backend: "ValidationBackend | None" = None,
+                 anchor_service=None, anchor_log_pubkey: bytes | None = None,
+                 anchor_key: str | None = None, witness_keys: dict | None = None,
+                 witness_quorum: int = 0):
         self.validator = validator
         self.trusted_issuer_pubkey = trusted_issuer_pubkey
         self.store_path = store_path
         self.anchor_path = (store_path + ".anchor") if store_path else None
         self.backend = backend
+        # external anchor (optional; when set, it is authoritative over the sidecar)
+        self.anchor_service = anchor_service
+        self.anchor_log_pubkey = anchor_log_pubkey
+        self.anchor_key = anchor_key or (store_path or "redemption-ledger")
+        self.witness_keys = witness_keys
+        self.witness_quorum = witness_quorum
         self.redeemed: dict[str, dict] = {}     # serial -> signed redemption record
         self.credits: dict[str, int] = {}       # account -> credited cents
         self.events: list[dict] = []            # signed hash-chained ledger
         self.postings: dict[str, dict] = {}     # serial -> backend posting status (unsigned)
         if store_path and os.path.exists(store_path):
             self._load()
+        elif self._external_anchor_len() > 0:
+            # the EXTERNAL log says this ledger had events; the store is gone.
+            # Deleting the store (and the sidecar) is the cheapest rollback there
+            # is — starting fresh would re-redeem every spent coin. The log is the
+            # one record the disk-owner cannot erase, so this refusal holds.
+            raise CoinError("redemption ledger missing but the external anchor log "
+                            "records prior events (store deleted → rollback)")
         elif self.anchor_path and os.path.exists(self.anchor_path):
             # an anti-rollback anchor with NO store file means the ledger was
             # deleted out from under it — starting fresh here would re-redeem every
@@ -238,12 +261,64 @@ class RedemptionRegistry:
         if self.anchor_path and os.path.exists(self.anchor_path):
             with open(self.anchor_path) as f:
                 anchor = json.load(f)
-            alen = anchor.get("len", 0)
-            if len(self.events) < alen:
-                raise CoinError("redemption ledger rollback/truncation detected "
-                                f"({len(self.events)} events < anchored {alen})")
-            if alen > 0 and self.events[alen - 1]["hash"] != anchor.get("head"):
-                raise CoinError("redemption ledger head anchor mismatch (rollback)")
+            self._enforce_anchor(anchor.get("len", 0), anchor.get("head"), "sidecar")
+        # the EXTERNAL anchor is checked second and is authoritative: it is the only
+        # one an attacker who owns this disk cannot rewrite.
+        alen, ahead = self._external_anchor()
+        if alen:
+            self._enforce_anchor(alen, ahead, "external log")
+
+    def _enforce_anchor(self, alen: int, ahead, source: str):
+        """The loaded chain must EXTEND the anchored prefix. Any valid signed
+        chain has valid signed prefixes, so length+head is what distinguishes a
+        legitimate ledger from a truncated one."""
+        if len(self.events) < alen:
+            raise CoinError(f"redemption ledger rollback/truncation detected via "
+                            f"{source} ({len(self.events)} events < anchored {alen})")
+        if alen > 0 and self.events[alen - 1]["hash"] != ahead:
+            raise CoinError(f"redemption ledger head anchor mismatch via {source} "
+                            "(rollback)")
+
+    # -- external anchor (bingo.anchor) ------------------------------------
+    def _external_anchor(self):
+        """(length, head) from the external log, or (0, None) if no service is
+        configured. Fails CLOSED: with a service configured, an unverifiable or
+        malformed receipt raises rather than degrading to 'unanchored'."""
+        if self.anchor_service is None:
+            return 0, None
+        from bingo.anchor import verify_latest_anchor
+        receipt = self.anchor_service.receipt(self.anchor_key)
+        if receipt is None:
+            return 0, None                      # never anchored: nothing to enforce
+        if self.anchor_log_pubkey is None:
+            raise CoinError("an anchor service is configured but no log public key "
+                            "was given — refusing to trust an unverifiable anchor")
+        ok, payload, notes = verify_latest_anchor(
+            receipt, self.anchor_log_pubkey, self.witness_keys, self.witness_quorum)
+        if not ok:
+            raise CoinError(f"external anchor did not verify: {notes[-1] if notes else '?'}")
+        rec = json.loads(payload.decode())
+        if rec.get("ledger") != self.anchor_key:
+            raise CoinError("external anchor is for a different ledger")
+        return int(rec.get("len", 0)), rec.get("head")
+
+    def _external_anchor_len(self) -> int:
+        try:
+            return self._external_anchor()[0]
+        except CoinError:
+            raise
+        except Exception:
+            return 0
+
+    def _anchor_externally(self):
+        """Pin the current head in the external log. Called AFTER the store is
+        committed, so the log never claims a length the ledger does not have."""
+        if self.anchor_service is None:
+            return
+        payload = canonical_json({
+            "ledger": self.anchor_key, "len": len(self.events),
+            "head": self.events[-1]["hash"] if self.events else ZERO})
+        self.anchor_service.anchor(self.anchor_key, payload)
 
     def _persist(self):
         if not self.store_path:
@@ -260,6 +335,7 @@ class RedemptionRegistry:
         with open(atmp, "w") as f:
             json.dump(anchor, f)
         os.replace(atmp, self.anchor_path)
+        self._anchor_externally()            # ...and in the log the attacker can't edit
 
     def _emit(self, type_: str, data: dict, ts: str):
         ev = {"seq": len(self.events), "ts": ts, "type": type_,

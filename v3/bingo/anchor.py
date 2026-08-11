@@ -389,3 +389,64 @@ def verify_anchored(payload: bytes, receipt: dict, log_pubkey: bytes,
         return True, notes
     except Exception as e:
         return False, notes + [f"malformed anchor receipt: {type(e).__name__}: {e}"]
+
+
+# -- the operator side: "what is the latest anchor for X?" ---------------------
+
+@dataclass
+class AnchorService:
+    """What a log OPERATOR actually runs: the append-only log, plus the index a
+    relying party needs.
+
+    A bare `TransparencyLog` can prove *a* statement was logged, but a party
+    guarding against rollback needs the opposite question answered - **"what is
+    the LATEST thing anchored under this key?"** Without that, an attacker who
+    rolls a ledger back to an earlier state can present the earlier state's
+    perfectly genuine receipt, and every proof checks out. Monotonicity has to
+    come from the log operator, because that is the one party the attacker on the
+    local disk does not control.
+
+    `latest` is the operator's index. It is not a trust addition: everything it
+    returns is still backed by an inclusion proof against a signed head.
+    """
+    log: TransparencyLog
+    latest: dict = field(default_factory=dict)      # key -> (payload, index)
+
+    def anchor(self, key: str, payload: bytes) -> dict:
+        """Log `payload` under `key` and return a fresh receipt."""
+        index = self.log.append(payload)
+        self.latest[key] = (bytes(payload), index)
+        return self.receipt(key)
+
+    def receipt(self, key: str) -> dict | None:
+        """The receipt for the latest anchor under `key`, or None if never
+        anchored. None is meaningful - see `verify_latest_anchor`."""
+        if key not in self.latest:
+            return None
+        payload, index = self.latest[key]
+        sth = self.log.signed_head()
+        return {"key": key, "payload_hex": payload.hex(), "index": index,
+                "sth": sth.to_dict(),
+                "inclusion": [h.hex() for h in self.log.inclusion_proof(index)]}
+
+
+def verify_latest_anchor(receipt, log_pubkey: bytes, witness_keys: dict | None = None,
+                         quorum: int = 0) -> tuple:
+    """Verify a latest-anchor receipt and hand back the payload it commits to.
+
+    Returns `(ok, payload_bytes | None, notes)`. Fails closed on anything
+    malformed - the caller is normally deciding whether to trust money state, so
+    "couldn't parse it" must never read as "fine".
+    """
+    notes: list = []
+    try:
+        if not isinstance(receipt, dict):
+            return False, None, ["anchor receipt must be an object"]
+        payload = bytes.fromhex(receipt["payload_hex"])
+        ok, n = verify_anchored(payload, receipt, log_pubkey, witness_keys, quorum)
+        notes += n
+        if not ok:
+            return False, None, notes
+        return True, payload, notes
+    except Exception as e:
+        return False, None, notes + [f"malformed anchor receipt: {type(e).__name__}: {e}"]
