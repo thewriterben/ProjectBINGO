@@ -353,7 +353,12 @@ def verify_directory(doc) -> tuple:
                 return False, notes + [f"event {i}: hash does not commit to the event"]
             prev_hash = expected_hash
 
-        if doc.get("head") not in (None, prev_hash):
+        # absence means "not claimed" and is fine; a head that is PRESENT must be
+        # right, including an explicit null. This matches verify_passport's
+        # chain_head handling - the previous `not in (None, prev_hash)` let an
+        # explicit `"head": null` through, which is a malformed value rather than
+        # an absence. Sibling verifiers drifting apart is how round 9 happened.
+        if doc.get("head", prev_hash) != prev_hash:
             return False, notes + ["published head does not match the replayed chain"]
 
         notes.append(f"key directory verified: {len(events)} events, "

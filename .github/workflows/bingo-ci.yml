@@ -6,15 +6,63 @@ on:
     paths: ["v3/**", "sentinel/**", "run_tests.py", ".github/workflows/bingo-ci.yml"]
   pull_request:
     paths: ["v3/**", "sentinel/**", "run_tests.py", ".github/workflows/bingo-ci.yml"]
+  workflow_dispatch:          # run the deep fuzz on demand
+  schedule:
+    # deep fuzz, 04:17 UTC daily. Off the hour on purpose - GitHub's shared
+    # schedulers are congested at :00 and jobs get delayed.
+    - cron: "17 4 * * *"
 
 jobs:
   test:
+    name: suite (stdlib only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # No dependencies — the whole suite is stdlib only. That's the point.
+      # No dependencies — the whole suite is stdlib only. That's the point, and
+      # this job is what keeps it true: if anything ever grows an import that
+      # isn't in the standard library, it fails here.
       - name: Run BINGO + Sentinel test suite
         run: python run_tests.py
+
+  audited-signing:
+    name: suite (with audited crypto)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # The same suite with an audited constant-time Ed25519 present. The stdlib
+      # job above proves BINGO runs with nothing installed; this one proves the
+      # audited signing path is a true drop-in — tests/test_signing_path.py only
+      # performs its byte-identity checks when the library exists, so without this
+      # job those checks would silently never run in CI.
+      - name: Install audited crypto
+        run: pip install cryptography
+      - name: Run suite on the audited signing path
+        run: python run_tests.py
+
+  deep-fuzz:
+    name: deep fuzz (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # `cryptography` here is purely for speed: signing dominates the cost of
+      # building the valid documents the fuzzer mutates, so the audited path buys
+      # far more iterations per minute.
+      - name: Install audited crypto (for fuzz throughput)
+        run: pip install cryptography
+      - name: Deep property-based fuzz
+        env:
+          BINGO_FUZZ_ITERS: "20000"
+        run: |
+          cd v3 && python -m tests.test_fuzz_invariants
+      # A fuzz failure prints the seed that produced it; replay with
+      #   BINGO_FUZZ_SEED=<seed> BINGO_FUZZ_ITERS=<n> python -m tests.test_fuzz_invariants

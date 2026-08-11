@@ -44,6 +44,7 @@ SUITE = [
     ("coin redemption: persistence + backend", "tests.test_redemption", V3),
     ("k2 driver (fake moonraker)", "tests.test_k2_driver", V3),
     ("architecture thesis (one-kernel conformance)", "tests.test_kernel_thesis", V3),
+    ("property-based fuzz over the kernel invariants", "tests.test_fuzz_invariants", V3),
     ("red-team regressions (19 confirmed breaks, all fixed)", "tests.test_redteam_regressions", V3),
     ("red-team round-2 regressions (15 confirmed breaks, all fixed)", "tests.test_redteam_r2_regressions", V3),
     ("red-team round-3 regressions (9 confirmed breaks, all fixed)", "tests.test_redteam_r3_regressions", V3),

@@ -304,7 +304,15 @@ def _verify_transport(pp: dict) -> tuple[bool, list[str]]:
                  f"held through {'delivery' if saw_delivery else 'pickup' if saw_pickup else 'booking'}")
     if saw_delivery:
         notes.append("PICKUP and DELIVERY both signed by the bound carrier — not re-brokered")
-    notes.append(f"chain head {pp['chain_head'][:16]}… (verified)")
+    # the advertised chain_head must actually BE the chain head. The sibling
+    # passport verifier has bound this since round 5 (an unbound head lets a
+    # document advertise someone else's provenance); this one only *printed* it as
+    # "(verified)" while never checking it — a claim in the output that the code
+    # did not back. Found by tests/test_fuzz_invariants.py.
+    if pp.get("chain_head", events[-1]["hash"]) != events[-1]["hash"]:
+        return False, notes + ["top-level chain_head != actual chain head "
+                               "(advertising a different custody chain)"]
+    notes.append(f"chain head {events[-1]['hash'][:16]}… (verified)")
     return True, notes
 
 
