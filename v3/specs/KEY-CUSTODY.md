@@ -138,28 +138,41 @@ Three properties worth stating explicitly:
   live offline - paper, a safe, an HSM in a drawer - and never touch the signing
   host.
 
-## The limit: a document cannot prove its own age
+## Backdating: the limit, and how it was closed
 
 `verify_as_identity()` defaults to evaluating against the directory HEAD, so **a
-revoked key is refused.** Accepting a signature from a since-revoked key is
-possible only by explicitly passing the historical position, and that opt-in is
-where the honesty is required.
+revoked key is refused.**
 
-An attacker holding a stolen key that was later revoked can always *assert* the
-signature predates the revocation. Nothing inside a self-contained document
-refutes that, because the attacker controls every byte of the document they hand
-you - including any position or timestamp it claims. This is the same shape as the
-anti-rollback limitation already documented in `provenance/coin.py`: if the
-adversary can rewrite the anchor too, a single self-contained artifact cannot
-detect it.
+The hard case is a signature made *before* a key was revoked. Originally the only
+option was to let the caller assert a historical position - and that assertion
+costs an attacker holding the stolen key exactly nothing, because they control
+every byte of the document they hand you, including any position or timestamp it
+claims. A self-contained artifact cannot prove its own age. This was documented
+here as an open limitation, needing an **external ordering witness**.
 
-Closing it for real needs an **external ordering witness** - a countersignature
-from an independent party, a directory head published where the attacker cannot
-rewrite it, or a timestamp authority. That is an architectural addition, not a
-patch, and it is the same missing primitive the coin rollback note calls for; one
-external anchor would close both. Until then the mitigation is the fail-closed
-default: unless a relying party deliberately opts into a historical position, a
-revoked key does not verify.
+**That witness now exists** (`bingo/anchor.py`, `specs/EXTERNAL-ANCHOR.md`), so
+the assertion path is gone. Accepting a revoked key's signature now requires an
+`anchor` proof that the signature was recorded in an append-only Merkle log
+*before* the revocation was:
+
+```python
+verify_as_identity(msg, sig, directory_doc, anchor={
+    "log_pubkey": ..., "revoked_payload": ...,
+    "receipt": {...},              # inclusion proof for the signature
+    "revocation_receipt": {...},   # inclusion proof for the revocation
+    "witness_keys": {...}, "quorum": 2,
+})
+```
+
+Both halves must verify, they must come from the same log, and the signature's
+index must be strictly lower. Logging the forgery *after* the revocation yields a
+perfectly valid inclusion proof and is still refused, because order is the claim.
+
+What this converts, honestly: "trust whatever the document says about when it was
+signed" becomes "trust that the log operator and a quorum of independent witnesses
+are not all colluding." That is a real trust assumption, not a proof - but it is
+a bounded one that a relying party chooses, and it is enormously better than a
+claim the attacker writes themselves.
 
 ## Operator runbook
 
@@ -209,7 +222,9 @@ Publish `directory.to_dict()` wherever relying parties can fetch it; they call
 
 ## What is still open
 
-- **No external anchor** (above) - shared with the coin rollback limitation.
+- ~~**No external anchor**~~ **CLOSED** (`bingo/anchor.py`) - and the same
+  primitive is now available to close the `provenance/coin.py` rollback
+  limitation, which has not yet been wired up.
 - **The file encryption is hand-rolled and unaudited.** Use the KMS seam for real
   value.
 - **`ExternalKmsSigner` is a seam, not an integration** - it fails closed and is

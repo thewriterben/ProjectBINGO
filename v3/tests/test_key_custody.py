@@ -241,19 +241,24 @@ def test_rotated_away_key_no_longer_signs_as_the_identity():
     assert not ok, notes
 
 
-def test_accepting_a_pre_revocation_signature_is_explicit_opt_in():
-    """The honest limitation: a document cannot prove its own age, so accepting a
-    signature from a since-revoked key is possible ONLY by explicitly naming the
-    historical position. The default refuses; the escape hatch is deliberate."""
+def test_pre_revocation_acceptance_now_requires_PROOF_not_an_assertion():
+    """Tightened once `bingo/anchor.py` existed.
+
+    This used to accept an explicitly-asserted historical position, because a
+    self-contained document cannot prove its own age and there was nothing better
+    available. That assertion costs an attacker holding the stolen key exactly
+    nothing, so it is now REFUSED: predating the revocation has to be proven
+    against the external append-only log. See tests/test_anchor.py for the proof
+    path that does get accepted."""
     d, k1, rec = _identity()
     msg = b"signed before the compromise"
     sig, at = k1.sign_hex(msg), len(d.events) - 1        # position 0, pre-revocation
     revoke_seq = d.revoke(rec, k1.public_key(), reason="compromised").seq
 
     assert not verify_as_identity(msg, sig, d.to_dict())[0], "default must refuse"
-    ok, _ = verify_as_identity(msg, sig, d.to_dict(), at_seq=at)
-    assert ok, "an explicit pre-revocation position may be accepted"
-    # ...but never at or after the revocation itself
+    ok, notes = verify_as_identity(msg, sig, d.to_dict(), at_seq=at)
+    assert not ok, "asserting a pre-revocation position must not be enough"
+    assert "anchor proof" in notes[-1], notes
     ok, notes = verify_as_identity(msg, sig, d.to_dict(), at_seq=revoke_seq)
     assert not ok and "revoked" in notes[-1], notes
 

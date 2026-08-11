@@ -209,6 +209,49 @@ class KeyDirectory:
         return d
 
 
+# -- anchored ordering (closes the "a document cannot prove its own age" gap) --
+
+def _anchored_before_revocation(message: bytes, anchor: dict | None) -> tuple:
+    """Did the external log receive `message` strictly before it received the
+    revocation? Both halves must be proven; a missing or malformed half is a
+    refusal, never a pass.
+    """
+    if not anchor:
+        return False, []
+    notes: list = []
+    try:
+        from .anchor import verify_anchored          # local import: optional dep
+        log_pubkey = anchor.get("log_pubkey")
+        receipt = anchor.get("receipt")
+        rev_receipt = anchor.get("revocation_receipt")
+        if not (log_pubkey and receipt and rev_receipt):
+            return False, ["anchor proof incomplete (need log_pubkey, receipt, "
+                           "revocation_receipt)"]
+        wk, q = anchor.get("witness_keys"), anchor.get("quorum", 0)
+
+        ok, n = verify_anchored(message, receipt, log_pubkey, wk, q)
+        notes += [f"signature anchor: {x}" for x in n]
+        if not ok:
+            return False, notes
+        # the revocation's own logged payload is the directory event hash
+        ok, n = verify_anchored(anchor["revoked_payload"], rev_receipt,
+                                log_pubkey, wk, q)
+        notes += [f"revocation anchor: {x}" for x in n]
+        if not ok:
+            return False, notes
+
+        # both are in the SAME log, so their indices are comparable
+        if receipt["sth"]["log_id"] != rev_receipt["sth"]["log_id"]:
+            return False, notes + ["anchor proofs come from different logs"]
+        if not receipt["index"] < rev_receipt["index"]:
+            return False, notes + [
+                f"signature was logged at index {receipt['index']}, NOT before the "
+                f"revocation at index {rev_receipt['index']}"]
+        return True, notes
+    except Exception as e:
+        return False, notes + [f"malformed anchor proof: {type(e).__name__}: {e}"]
+
+
 # -- document-only verification ------------------------------------------------
 
 def verify_directory(doc) -> tuple:
@@ -321,17 +364,31 @@ def verify_directory(doc) -> tuple:
 
 
 def verify_as_identity(message: bytes, sig_hex: str, directory_doc,
-                       at_seq: int | None = None) -> tuple:
+                       at_seq: int | None = None, anchor: dict | None = None) -> tuple:
     """Verify a signature as an IDENTITY rather than as a raw public key.
 
     This is the call that makes rotation usable: the caller asks "did this
     identity sign this?", and the directory decides which key that means.
 
-    `at_seq=None` (the default) evaluates against the directory HEAD, so a key
-    that has been revoked is REFUSED. Pass an explicit historical `at_seq` only
-    when you have independent reason to believe the signature predates the
-    compromise - see the module docstring on why a document cannot prove its own
-    age.
+    `at_seq=None` (the default) evaluates against the directory HEAD. An explicit
+    earlier `at_seq` resolves the key that was active then - which is the ordinary
+    way to check a signature made before a ROTATION, and is not a security
+    question, because rotation does not mean the old key leaked.
+
+    **Revoked keys are different, and `at_seq` alone will not buy you one.** A
+    revoked key is refused unless the caller supplies `anchor` proving the
+    signature was logged BEFORE the revocation was logged:
+
+        anchor = {"log_pubkey": bytes,
+                  "receipt": {...},              # this message, in the log
+                  "revocation_receipt": {...},   # the revocation, in the log
+                  "witness_keys": {...}, "quorum": int}
+
+    That is the whole reason `bingo/anchor.py` exists. Before it, "this was signed
+    before the compromise" was an assertion the holder of the stolen key could
+    simply make, and nothing in a self-contained document could contradict it.
+    Now it is a claim about positions in an append-only log that a third party
+    keeps and witnesses cosign - so it can be checked instead of believed.
     """
     notes: list = []
     try:
@@ -343,15 +400,19 @@ def verify_as_identity(message: bytes, sig_hex: str, directory_doc,
         if not isinstance(seq, int) or seq < 0 or seq >= len(d.events):
             return False, notes + [f"directory position {at_seq!r} out of range"]
         pub = d.active_key_at(seq)
-        # Revocation is checked against the key this position actually resolves
-        # to. Evaluating at the HEAD (the default) therefore refuses a key that
-        # is still current but has been declared compromised; evaluating at an
-        # explicit earlier position accepts it only if the revocation had not
-        # happened yet AT that position.
+        # Revocation is checked against the key this position resolves to. Being
+        # revoked is fatal at ANY position now: predating the revocation has to be
+        # PROVEN against the external log, not asserted by choosing an at_seq.
         revoked_seq = d.revoked_at(pub)
-        if revoked_seq is not None and revoked_seq <= seq:
-            return False, notes + [
-                f"key was revoked at directory position {revoked_seq} - refusing"]
+        if revoked_seq is not None:
+            ok, anotes = _anchored_before_revocation(message, anchor)
+            notes += anotes
+            if not ok:
+                return False, notes + [
+                    f"key was revoked at directory position {revoked_seq} - refusing "
+                    "(supply an anchor proof that this signature was logged before "
+                    "the revocation to accept it)"]
+            notes.append("pre-revocation position PROVEN against the external log")
         try:
             sig = bytes.fromhex(sig_hex)
         except (ValueError, TypeError):
