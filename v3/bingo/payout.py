@@ -245,7 +245,7 @@ class PayoutEngine:
     payouts survive a restart and still can't be repeated."""
 
     def __init__(self, rail: PayoutRail, journal_path: str | None = None,
-                 currency: str = "usd", store=None):
+                 currency: str = "usd", store=None, audit=None):
         """`journal_path` is the original JSONL journal and remains the default:
         existing files on existing disks keep working untouched.
 
@@ -259,6 +259,12 @@ class PayoutEngine:
         self.currency = currency
         self.journal_path = journal_path
         self._store = store
+        # `audit` is a bingo.audit.AuditLog. The journal already records what
+        # was paid; the audit log records it somewhere an intruder cannot
+        # quietly edit, chained and optionally signed. Separate concerns: the
+        # journal exists so we never double-pay, the audit exists so we can
+        # prove afterwards what happened.
+        self._audit = audit
         self._journal: dict[str, PayoutRecord] = {}
         if store is not None:
             for _key, d in store.items():
@@ -323,6 +329,13 @@ class PayoutEngine:
         rec.attempts += 1
         rec.status, rec.external_ref, rec.error = res.status, res.external_ref, res.error
         self._persist(rec)
+        if self._audit is not None:
+            self._audit.append("payout.attempt", actor=rec.account,
+                               idem_key=rec.key, job_id=rec.job_id,
+                               amount_cents=rec.amount_cents,
+                               currency=rec.currency, status=rec.status,
+                               external_ref=rec.external_ref,
+                               attempts=rec.attempts, error=rec.error)
         return rec
 
     def pay_legs(self, legs, *, order_id: str, job_id: str) -> list[PayoutRecord]:

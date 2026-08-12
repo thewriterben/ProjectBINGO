@@ -174,6 +174,7 @@ class HardenedHandler(BaseHTTPRequestHandler):
     policy: Policy = Policy()
     reader: RateLimiter | None = None
     writer: RateLimiter | None = None
+    audit = None                           # bingo.audit.AuditLog, or None
     protocol_version = "HTTP/1.1"          # so Content-Length is honoured
     server_version = "bingo"
     sys_version = ""                       # do not advertise the Python version
@@ -217,6 +218,7 @@ class HardenedHandler(BaseHTTPRequestHandler):
                   ctype: str = "application/json", extra: dict | None = None):
         body = obj.encode() if isinstance(obj, str) else \
             json.dumps(obj, indent=2).encode()
+        self._status = code
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -268,6 +270,7 @@ class HardenedHandler(BaseHTTPRequestHandler):
         if not hmac.compare_digest(given.strip(), want):
             self.send_json({"error": "unauthorized"}, 401)
             return False
+        self._authed = True
         return True
 
     def _read_body(self) -> tuple[bool, dict]:
@@ -330,6 +333,8 @@ class HardenedHandler(BaseHTTPRequestHandler):
         return self.handle_get(u)
 
     def _guarded(self, mutating: bool):
+        started = time.monotonic()
+        self._status = 0
         try:
             self._dispatch(mutating)
         except Exception:
@@ -339,6 +344,30 @@ class HardenedHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "internal error"}, 500)
             except Exception:
                 pass
+        finally:
+            self._audit_request(started)
+
+    def _audit_request(self, started: float) -> None:
+        """One record per request, including the ones that were refused - a 401
+        nobody wrote down is a failed intrusion nobody can count.
+
+        The path is recorded WITHOUT its query string. Query strings in this
+        system carry coin credentials (`/api/coin?c=...`), and an audit log is a
+        file people copy around; see bingo/audit.py on logging the thing you
+        were protecting."""
+        log = self.audit
+        if log is None:
+            return
+        try:
+            log.append("http.request",
+                       actor=self._client_key(),
+                       method=self.command,
+                       path=urlparse(self.path).path,
+                       status=getattr(self, "_status", 0),
+                       ms=round((time.monotonic() - started) * 1000, 1),
+                       authenticated=bool(getattr(self, "_authed", False)))
+        except Exception:
+            pass                             # observation must never break serving
 
     def do_GET(self):
         self._guarded(False)
@@ -354,7 +383,8 @@ class HardenedHandler(BaseHTTPRequestHandler):
         unless the Origin is one we actually listed."""
         origin = self.headers.get("Origin")
         allowed = bool(origin and origin in self.policy.cors_origins)
-        self.send_response(204 if allowed else 403)
+        self._status = 204 if allowed else 403
+        self.send_response(self._status)
         if allowed:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
@@ -403,7 +433,8 @@ class GuardedServer(ThreadingHTTPServer):
 
 
 def build_server(handler_cls, host: str, port: int, policy: Policy,
-                 *, tls_cert: str | None = None, tls_key: str | None = None):
+                 *, tls_cert: str | None = None, tls_key: str | None = None,
+                 audit=None):
     """Bind, with the startup refusals that are the point of this module.
 
     These are checked here rather than at request time on purpose: an operator
@@ -432,6 +463,7 @@ def build_server(handler_cls, host: str, port: int, policy: Policy,
         "policy": policy,
         "reader": RateLimiter(policy.rate_limit, policy.rate_window),
         "writer": RateLimiter(policy.mutating_rate_limit, policy.rate_window),
+        "audit": audit,
     })
     srv = GuardedServer((host, port), cls)
     if tls:
@@ -440,6 +472,14 @@ def build_server(handler_cls, host: str, port: int, policy: Policy,
         ctx.load_cert_chain(tls_cert, tls_key)
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
     return srv
+
+
+def health_payload(handler_cls, policy: Policy, *, store=None) -> dict:
+    """The shared body behind every server's /api/health, so the three cannot
+    disagree about what "ready" means."""
+    from . import health
+    return health.report(store=store, audit=handler_cls.audit,
+                         writes_enabled=bool(policy.auth_token))
 
 
 def add_server_args(ap, *, default_port: int) -> None:
@@ -456,6 +496,10 @@ def add_server_args(ap, *, default_port: int) -> None:
     ap.add_argument("--max-body-kb", type=int, default=256)
     ap.add_argument("--rate-limit", type=int, default=120,
                     help="reads per minute per client")
+    ap.add_argument("--audit", default=os.path.join("out", "audit"),
+                    help="base path for the tamper-evident audit log")
+    ap.add_argument("--no-audit", action="store_true",
+                    help="do not record an audit log (not advised)")
 
 
 def serve(handler_cls, args, *, name: str) -> int:
@@ -463,20 +507,39 @@ def serve(handler_cls, args, *, name: str) -> int:
         cors_origins=tuple(args.cors_origin),
         max_body_bytes=args.max_body_kb * 1024,
         rate_limit=args.rate_limit)
+    log = None
+    if not getattr(args, "no_audit", False):
+        from .audit import AuditLog
+        log = AuditLog(args.audit)
     try:
         srv = build_server(handler_cls, args.host, args.port, policy,
-                           tls_cert=args.tls_cert, tls_key=args.tls_key)
+                           tls_cert=args.tls_cert, tls_key=args.tls_key,
+                           audit=log)
     except ConfigRefused as e:
         print(f"x refusing to start:\n{e}")
+        if log:
+            log.close()
         return 2
     scheme = "https" if (args.tls_cert and args.tls_key) else "http"
     auth = "token required for writes" if policy.auth_token else \
         "WRITES DISABLED (no $BINGO_API_TOKEN)"
     print(f"-> {name} on {scheme}://{args.host}:{args.port}  [{auth}]")
+    if log is not None:
+        # lifecycle records, so a gap in the sequence has an explanation or it
+        # doesn't - "the log just stops here" should be a question, not a shrug
+        log.append("process.start", actor=name, host=args.host,
+                   port=args.port, tls=bool(args.tls_cert and args.tls_key),
+                   writes_enabled=bool(policy.auth_token))
+        print(f"   audit log {args.audit} (head {log.head_hash()[:12]}...)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         print("\nbye")
     finally:
         srv.server_close()
+        if log is not None:
+            log.append("process.stop", actor=name)
+            ok, notes = log.verify()
+            print(f"   audit chain {'OK' if ok else 'FAILED'}: {notes[-1]}")
+            log.close()
     return 0

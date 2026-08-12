@@ -23,6 +23,7 @@ SUITE = [
     ("storage seam: json default, transactional sqlite opt-in", "tests.test_store", V3),
     ("node state behind the seam: registry, reputation, migration", "tests.test_node_storage", V3),
     ("http surface: auth, body limits, rate limiting, TLS refusals", "tests.test_http_surface", V3),
+    ("observability: tamper-evident audit, health, tested restore", "tests.test_observability", V3),
     ("external anchor: merkle transparency log + ordering proofs", "tests.test_anchor", V3),
     ("coin rollback closed by the external anchor", "tests.test_coin_anchor", V3),
     ("thin-vertical demo", "bingo.demo.run", V3),

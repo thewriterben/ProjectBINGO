@@ -32,7 +32,8 @@ import argparse
 import json
 import os
 import threading
-from .httpguard import HardenedHandler, add_server_args, serve
+from .httpguard import (HardenedHandler, add_server_args, health_payload,
+                        serve)
 from urllib.parse import urlparse
 
 from . import evidence
@@ -316,7 +317,12 @@ class Handler(HardenedHandler):
         if path == "/" or path == "/index.html":
             return self._send(PAGE, ctype="text/html")
         if path == "/api/health":
-            return self._send({"ok": True, "service": "bingo", "nodes": len(AGENTS)})
+            # live vs ready are different questions: a node can be perfectly
+            # able to serve and still be in a configuration unfit to hold value.
+            # Reports properties only, never values - see bingo/health.py.
+            h = health_payload(type(self), self.policy)
+            h.update(service="bingo", nodes=len(AGENTS))
+            return self._send(h, 200 if h["ready"] else 503)
         if path == "/api/assets":
             return self._send(_assets())
         if path == "/api/nodes":
