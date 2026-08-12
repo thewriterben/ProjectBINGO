@@ -314,20 +314,40 @@ def _concurrent_appends(base: str, backend: str, n: int = 4) -> tuple[bool, int]
 
 def test_concurrent_appends_fork_the_chain_on_json_and_it_is_detected():
     """Appending is a read-modify-write: computing `prev` means reading the head.
-    Under JSON two processes read the same head and the chain forks.
+    Under JSON two processes read the same head and the chain forks or loses
+    records outright.
 
     The claim is deliberately narrow. This is NOT "JSON is fine because we catch
     it" - a detected corruption is still a corruption, and an audit log that
     fails to verify is an audit log you cannot use. It is: the failure is loud
-    rather than silent, and the fix is the SQLite backend, checked below."""
+    rather than silent, and the fix is the SQLite backend, checked below.
+
+    Bounded retry for the same reason as `test_node_storage`: losing a race is
+    probabilistic, and an assertion that *usually* holds is precisely the
+    flakiness these tests are about. The loop observes the real behaviour under
+    real contention with a hard bound, so a real fix turns it red rather than
+    letting it quietly pass."""
     with tempfile.TemporaryDirectory() as d:
-        ok, n = _concurrent_appends(os.path.join(d, "audit"), "json")
-        assert not ok or n < 24, (
-            f"expected the JSON backend to fork or drop records under 4 "
-            f"concurrent appenders; got a clean chain of {n}")
+        seen = []
+        for attempt in range(4):
+            ok, n = _concurrent_appends(os.path.join(d, f"audit{attempt}"),
+                                        "json")
+            seen.append((ok, n))
+            if not ok or n < 24:
+                return
+        assert False, (
+            f"4 rounds of 4 concurrent appenders and the JSON backend produced "
+            f"a clean, complete chain every time: {seen}. Either JsonStore has "
+            f"grown cross-process locking - in which case this should become "
+            f"the opposite assertion - or the contention here stopped reaching "
+            f"the losing window.")
 
 
 def test_concurrent_appends_hold_on_sqlite():
+    """Exact and unconditional, because it is deterministic by construction -
+    unlike the JSON case above, which needs a retry loop because losing a race
+    is by nature probabilistic. That asymmetry IS the difference between the
+    backends, so it stays visible."""
     with tempfile.TemporaryDirectory() as d:
         ok, n = _concurrent_appends(os.path.join(d, "audit"), "sqlite")
         assert ok and n == 24, f"chain ok={ok}, {n}/24 records"
@@ -386,9 +406,16 @@ def test_http_requests_are_audited_including_the_refused_ones():
 
         recs = log.records()
         assert len(recs) == 2, [r["data"] for r in recs]
-        assert recs[0]["data"]["status"] == 200
-        assert recs[1]["data"]["status"] == 401, recs[1]["data"]
-        assert recs[1]["data"]["authenticated"] is False
+        # keyed by method, NOT by position. Each request gets its own connection
+        # and therefore its own handler thread, and the audit write happens in
+        # that thread - so the two records can land in either order. An earlier
+        # version of this test asserted the positional order and failed roughly
+        # once in forty, which is a flaky assertion rather than a real defect.
+        by = {r["data"]["method"]: r["data"] for r in recs}
+        assert by["GET"]["status"] == 200
+        assert by["POST"]["status"] == 401, by["POST"]
+        assert by["POST"]["authenticated"] is False
+        assert by["POST"]["path"] == "/api/redeem"
         blob = json.dumps(recs)
         assert "SECRETCOIN" not in blob, (
             "the query string was logged - coin credentials travel there")

@@ -377,6 +377,41 @@ def test_a_route_that_raises_returns_500_and_leaks_nothing():
         assert _req(s.url("/x"))[0] == 200
 
 
+def test_shutdown_waits_for_requests_still_in_flight():
+    """A handler writes its audit record at the very end of the request, so a
+    close that returns while handlers are running loses exactly the records
+    around a restart.
+
+    This currently holds for free - `ThreadingMixIn.server_close` joins, because
+    `block_on_close` defaults to True. The test exists to make that a checked
+    property rather than an inherited default: `daemon_threads = True` plus
+    `block_on_close = False` would drop handlers silently, and nothing else in
+    the suite would notice. `GuardedServer` also drains explicitly so the
+    guarantee does not depend on a stdlib default staying put."""
+    done = []
+
+    class Slow(G.HardenedHandler):
+        def handle_get(self, u):
+            self.send_json({"ok": True})
+            time.sleep(0.4)                 # still working after the response
+            done.append(u.path)
+
+    srv = G.build_server(Slow, "127.0.0.1", 0, G.Policy())
+    port = srv.server_address[1]
+    th = threading.Thread(target=srv.serve_forever, daemon=True)
+    th.start()
+    try:
+        _req(f"http://127.0.0.1:{port}/slow")
+    finally:
+        srv.shutdown()
+        srv.server_close()                  # must not return before the handler
+        th.join(timeout=5)
+    assert done == ["/slow"], (
+        "server_close() returned while a handler was still running - work that "
+        "handler had not finished (its audit record, for one) is lost")
+    assert srv.drain_timeout <= 30, "the drain must stay bounded"
+
+
 def test_the_python_version_is_not_advertised():
     """Free reconnaissance otherwise: `Server: BaseHTTP/0.6 Python/3.11.2` tells
     an attacker exactly which CVEs to try."""

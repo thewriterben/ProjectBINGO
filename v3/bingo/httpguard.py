@@ -422,6 +422,48 @@ class GuardedServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
+    #: How long `server_close()` waits for handlers still running. Bounded, so
+    #: one wedged client cannot stop the process from exiting.
+    drain_timeout = 10.0
+
+    def __init__(self, *a, **kw):
+        self._inflight = 0
+        self._drained = threading.Condition()
+        super().__init__(*a, **kw)
+
+    def process_request_thread(self, request, client_address):
+        with self._drained:
+            self._inflight += 1
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self._drained:
+                self._inflight -= 1
+                self._drained.notify_all()
+
+    def server_close(self):
+        """Wait for in-flight handlers before returning.
+
+        A handler writes its audit record at the very end of the request, so a
+        close that races the handler threads loses exactly the records around a
+        restart - which is often the interesting moment.
+
+        Honest about what this is: on CPython today `ThreadingMixIn.server_close`
+        already joins, because `block_on_close` defaults to True, so this is
+        **belt-and-braces rather than a proven fix**. It was added while chasing
+        an intermittent missing-audit-record failure whose real cause turned out
+        to be a test asserting an ordering that was never guaranteed. It is kept
+        because the join it relies on is a default a subclass or a future version
+        can flip, and `daemon_threads = True` plus `block_on_close = False` would
+        drop handlers on the floor silently. The drain is bounded, so one wedged
+        client still cannot stop the process exiting.
+        """
+        super().server_close()
+        deadline = time.monotonic() + self.drain_timeout
+        with self._drained:
+            while self._inflight and time.monotonic() < deadline:
+                self._drained.wait(0.05)
+
     def handle_error(self, request, client_address):
         import sys as _sys
         exc = _sys.exc_info()[1]

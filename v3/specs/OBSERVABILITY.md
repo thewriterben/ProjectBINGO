@@ -1,6 +1,6 @@
 # Observability: a record that survives the incident
 
-_Status: implemented (`bingo/audit.py`, `bingo/health.py`, `bingo/node/backup.py`), 42/42 suites. Written 2026-08-12._
+_Status: implemented (`bingo/audit.py`, `bingo/health.py`, `bingo/alert.py`, `bingo/node/{backup,watch}.py`), 43/43 suites. Written 2026-08-12._
 
 ## The question structured logging does not answer
 
@@ -116,11 +116,92 @@ identity. Key custody has its own threat model in `specs/KEY-CUSTODY.md`; a tool
 that quietly swept keys into a nightly tarball would undo it. There is a test
 that would fail the day someone "fixes" this for completeness.
 
+## Alerting: telling a human without training them to ignore you
+
+Everything above produces signal. Nothing read it, and a signal nobody is
+watching is a signal that does not exist - "the dashboard would have shown it" is
+what people say after an outage nobody saw.
+
+The hard part is not delivery. Delivery is a POST. **The failure mode of an
+alerting system is being ignored, and an ignored alerter is worse than none
+because it looks like coverage.** So most of `bingo/alert.py`, and most of its
+tests, are about restraint:
+
+- **A healthy node sends nothing.** Not "all checks passed" - nothing. A cron job
+  that mails you every five minutes to say it is fine is a cron job you filter.
+- **One problem is one notification.** Alerts carry a stable `key`; the same
+  problem seen forty times increments a counter, and re-notification backs off
+  geometrically (at most 6 notifications in 7 hours).
+- **Resolution is announced.** A channel that only ever carries bad news is a
+  channel people stop opening. But nothing is "resolved" that was never
+  announced - that is noise wearing a helpful hat.
+- **Escalation jumps the queue.** A warning that becomes critical must not
+  inherit the six-hour silence it earned as a warning.
+- **Dedupe state persists.** Cron is a fresh process every run; without
+  persistence, "have I already said this?" resets each time, which is the same as
+  not deduplicating at all.
+
+Severity comes from `health.py`, unchanged. Promoting a warning to critical
+because it *feels* important is how a stream becomes unreadable, and that
+judgement was already made once.
+
+### The two ways an alerter lies
+
+**Silently failing to deliver.** A webhook with no URL that returns success is
+indistinguishable from a healthy one until the incident, so it reports failure.
+A total delivery failure is recorded loudly; one exploding channel does not stop
+the others; and an alert nobody accepted is **retried next run** rather than
+marked as sent - marking it would lose the one message that mattered.
+
+**Going quiet because it died.** No news reads as good news. `python -m
+bingo.node.watch` records a heartbeat into the audit log every run, and
+`--check-stale` alerts on a stale one - but **a process cannot page you about
+its own absence.** If the watcher is not running, neither is any of its code.
+Calling this a deadman's switch would be a lie; it is half of one, and the other
+half is a second node, an uptime check, or a poll of `/api/health`. The code says
+so and a test asserts that it says so.
+
+Exit codes distinguish the three outcomes, so a scheduler never mistakes a run
+that *could not check* for a run that found nothing: `0` quiet, `1` firing, `2`
+could not check or could not deliver.
+
+Secrets never reach a channel - webhooks post to third parties with their own
+retention, so the audit log's redaction applies here for the same reason.
+
+## Two flaky assertions, fixed rather than loosened
+
+Worth recording because the fix is the same lesson as the storage seam: a test
+that *usually* passes is the failure mode, not a nuisance.
+
+**My own concurrency assertions were probabilistic.** "The JSON backend loses a
+registration" is true under contention and not *guaranteed* on any single round -
+measured 18-30 of 32 - so the assertion failed about one full-suite run in four.
+The temptation is to weaken the claim to something always true and vacuous.
+Instead the tests observe the real code under real contention with a hard bound
+(up to 4 rounds, assert the loss was seen), so a genuine fix - `JsonStore`
+growing cross-process locking - turns them red instead of quietly passing. The
+SQLite side stays exact and unconditional, because it is deterministic by
+construction; that asymmetry *is* the difference between the backends and is left
+visible.
+
+**And one that was simply wrong.** A test asserted that two audited HTTP requests
+appear in the log in request order. Each request gets its own connection and its
+own handler thread, and the audit write happens in that thread, so the order was
+never guaranteed. Keyed by method now. Chasing it did surface something worth
+keeping: `GuardedServer` now drains in-flight handlers on close explicitly. That
+is belt-and-braces - `ThreadingMixIn.server_close` already joins today - but the
+join depends on `block_on_close` staying True, and `daemon_threads = True` with
+`block_on_close = False` would drop handlers silently, losing exactly the audit
+records around a restart. There is now a test for the property rather than trust
+in a stdlib default.
+
 ## Still open
 
-- **Alerting does not exist.** Nothing watches the health endpoint or the audit
-  stream and tells a human. `sentinel/` is the natural home; this increment
-  produced the signal, not the notification.
+- **No paging integration beyond a generic webhook.** PagerDuty/Opsgenie
+  severity mapping, on-call rotation and acknowledgement are not modelled - an
+  alert here is fire-and-forget, and nothing tracks whether a human saw it.
+- **Rate-limit state is per-node.** Two nodes with the same problem notify
+  twice; there is no cross-node grouping.
 - **No log shipping.** `export_jsonl` writes the file; getting it off the box
   before an intruder deletes it is unsolved, and deletion is the one tampering
   mode the chain cannot catch alone.

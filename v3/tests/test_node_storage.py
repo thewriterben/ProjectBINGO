@@ -349,22 +349,39 @@ def test_the_seam_alone_narrows_the_race_without_closing_it():
     twenty is worse than one that fires every time** - the obvious bug gets
     found in development; this one waits until there is money in the file.
 
-    So the test contends properly: 4 processes x 8 registrations each. Assets
-    still go missing, quietly, with a well-formed file and no error anywhere.
+    Why the retry loop: the losing window is now short enough that a single
+    round of 4x8 registrations loses 2-14 of them but does *not* always lose
+    one, and an assertion that usually holds is exactly the flakiness this test
+    is about. It was caught failing 1 run in 4 against the full suite. Rather
+    than weaken the claim to something always true but vacuous, the test
+    observes the real code under real contention until it sees the loss, with a
+    hard bound - so a genuine fix (JsonStore growing cross-process locking)
+    turns this red instead of quietly passing.
     """
     with tempfile.TemporaryDirectory() as d:
-        n = _concurrent_registrations(os.path.join(d, "reg"), "json")
-        assert n < 32, (
-            f"expected the JSON backend to still lose registrations under real "
-            f"contention; got all {n}. If JsonStore ever legitimately keeps all "
-            f"32, it has grown cross-process locking and this should become the "
-            f"opposite assertion.")
+        counts = []
+        for attempt in range(4):
+            n = _concurrent_registrations(os.path.join(d, f"reg{attempt}"), "json")
+            counts.append(n)
+            if n < 32:
+                return
+        assert False, (
+            f"4 rounds of 4x8 concurrent registrations and the JSON backend "
+            f"lost nothing: {counts}. If JsonStore has grown cross-process "
+            f"locking this should become the opposite assertion; if not, the "
+            f"contention in this test stopped reaching the losing window.")
 
 
 def test_sqlite_keeps_every_concurrent_registration():
     """Identical worker code, one environment variable different. This is the
     fix - `BEGIN IMMEDIATE` serializes the saves, so no writer ever reads a
-    state that is about to be overwritten."""
+    state that is about to be overwritten.
+
+    Note the asymmetry in what each side can assert. This one is exact and
+    unconditional (32 of 32, every time) because it is deterministic by
+    construction; the JSON case above needs a retry loop because losing a race
+    is by nature probabilistic. That asymmetry IS the difference between the
+    two backends, so it is left visible rather than smoothed over."""
     with tempfile.TemporaryDirectory() as d:
         n = _concurrent_registrations(os.path.join(d, "reg"), "sqlite")
         assert n == 32, (
