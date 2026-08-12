@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from bingo.httpguard import HardenedHandler, add_server_args, serve
 from urllib.parse import urlparse
 
 from .passport import Actor
@@ -69,21 +69,11 @@ def simulate(delivering: str = "booked", damage: bool = False) -> dict:
     }
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *a):
-        pass
+class Handler(HardenedHandler):
+    """Routes only - the guards live in bingo/httpguard.py, shared with the other
+    two servers so this one cannot quietly fall behind them."""
 
-    def _send(self, obj, code=200, ctype="application/json"):
-        body = obj.encode() if isinstance(obj, str) else json.dumps(obj).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):
-        u = urlparse(self.path)
+    def handle_get(self, u):
         if u.path in ("/", "/index.html"):
             return self._send(PAGE, ctype="text/html; charset=utf-8")
         if u.path.startswith("/api/simulate"):
@@ -184,15 +174,9 @@ PAGE = _PAGE_TMPL.replace("__RESULTS__", json.dumps(_results()))
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Live auto-transport double-broker demo")
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8780)
+    add_server_args(ap, default_port=8780)
     args = ap.parse_args(argv)
-    srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Transport demo on http://{args.host}:{args.port}  (screen-share this)")
-    try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        srv.shutdown()
+    return serve(Handler, args, name="Transport demo (screen-share this)")
 
 
 if __name__ == "__main__":

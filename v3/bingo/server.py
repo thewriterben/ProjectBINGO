@@ -32,7 +32,7 @@ import argparse
 import json
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from .httpguard import HardenedHandler, add_server_args, serve
 from urllib.parse import urlparse
 
 from . import evidence
@@ -305,21 +305,14 @@ def _verify(job_id: str) -> dict:
     return {"ok": ok, "notes": notes}
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *a):
-        pass
+class Handler(HardenedHandler):
+    """Routes only. Body limits, auth on writes, rate limiting, CORS, security
+    headers and the 500-without-a-traceback all live in `HardenedHandler` - so a
+    route added here cannot forget them. See bingo/httpguard.py for why that is
+    a base class rather than a checklist."""
 
-    def _send(self, obj, code=200, ctype="application/json"):
-        body = obj.encode() if isinstance(obj, str) else json.dumps(obj, indent=2).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):
-        path = urlparse(self.path).path
+    def handle_get(self, u):
+        path = u.path
         if path == "/" or path == "/index.html":
             return self._send(PAGE, ctype="text/html")
         if path == "/api/health":
@@ -357,14 +350,9 @@ class Handler(BaseHTTPRequestHandler):
                               200 if o else 404)
         return self._send({"error": "not found"}, 404)
 
-    def do_POST(self):
-        path = urlparse(self.path).path
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length) if length else b"{}"
-        try:
-            body = json.loads(raw or b"{}")
-        except json.JSONDecodeError:
-            return self._send({"error": "invalid JSON"}, 400)
+    def handle_post(self, u, body):
+        # authenticated, size-capped and rate-limited before we get here
+        path = u.path
         if path == "/api/orders":
             try:
                 return self._send(_place_order(body))
@@ -490,17 +478,11 @@ $('#stmt').href='/api/creators/'+encodeURIComponent(acct)+'/statement';
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="BINGO web/API server")
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8760)
+    add_server_args(ap, default_port=8760)
     args = ap.parse_args(argv)
-    srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"BINGO network on http://{args.host}:{args.port}  ({len(AGENTS)} nodes, "
-          f"{len(REG.all())} designs seeded)")
-    print("try:  curl -s localhost:%d/api/assets | head" % args.port)
-    try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        srv.shutdown()
+    print(f"   {len(AGENTS)} nodes, {len(REG.all())} designs seeded")
+    print("   try:  curl -s localhost:%d/api/assets | head" % args.port)
+    return serve(Handler, args, name="BINGO network")
 
 
 if __name__ == "__main__":

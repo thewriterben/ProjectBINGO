@@ -22,7 +22,7 @@ import argparse
 import json
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from bingo.httpguard import HardenedHandler, add_server_args, serve
 from urllib.parse import urlparse, parse_qs
 
 from bingo.models import now_iso
@@ -104,21 +104,14 @@ def _redeem(payload: str, account: str, secret: str = "") -> dict:
             "balance_cents": REGISTRY.credits.get(account, 0)}
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *a):
-        pass
+class Handler(HardenedHandler):
+    """Routes only - guards in bingo/httpguard.py.
 
-    def _send(self, obj, code=200, ctype="application/json"):
-        body = obj.encode() if isinstance(obj, str) else json.dumps(obj).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+    `POST /api/redeem` spends a $25 coin, once, forever. It was open to the
+    internet with `Access-Control-Allow-Origin: *`; it now requires a bearer
+    token and sends no CORS header at all."""
 
-    def do_GET(self):
-        u = urlparse(self.path)
+    def handle_get(self, u):
         if u.path in ("/", "/redeem", "/index.html"):
             return self._send(PAGE, ctype="text/html; charset=utf-8")
         if u.path == "/api/coin":
@@ -126,13 +119,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(_validate(c))
         return self._send({"error": "not found"}, 404)
 
-    def do_POST(self):
-        u = urlparse(self.path)
-        length = int(self.headers.get("Content-Length") or 0)
-        try:
-            body = json.loads(self.rfile.read(length) or b"{}")
-        except json.JSONDecodeError:
-            return self._send({"error": "invalid JSON"}, 400)
+    def handle_post(self, u, body):
         if u.path == "/api/redeem":
             return self._send(_redeem(body.get("c", ""), body.get("account", ""),
                                       body.get("secret", "")))
@@ -278,18 +265,12 @@ PAGE = _page()
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="DGD coin validation/redemption server")
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8770)
+    add_server_args(ap, default_port=8770)
     args = ap.parse_args(argv)
-    srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"DGD coin validation on http://{args.host}:{args.port}")
     print(f"  issuer pubkey: {ISSUER.pubkey_hex[:16]}…")
     print(f"  demo coin (no code): /redeem?c={qr_payload(_SAMPLES['DGD-2026-0001'])[:36]}…")
     print(f"  demo coin (scratch-off): serial DGD-2026-0002, code {_SECRETS['DGD-2026-0002']}")
-    try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        srv.shutdown()
+    return serve(Handler, args, name="DGD coin validation")
 
 
 if __name__ == "__main__":
