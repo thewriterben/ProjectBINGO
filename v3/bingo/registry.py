@@ -7,9 +7,9 @@ effective split, scaled by parent_share_bps, frozen at registration time.
 
 from __future__ import annotations
 
-import json
 import os
 
+from . import store as _store
 from .models import (Asset, Split, SplitPayee, Derivation, License,
                      LicenseTemplate, sha256_hex, canonical_json)
 
@@ -21,25 +21,62 @@ class AssetRegistry:
 
     # -- persistence (local store; stand-in for IPFS + chain registry) --------
 
-    def save(self, store_dir: str):
+    def save(self, store_dir: str, *, store=None):
+        """Persist through the storage seam (`bingo/store.py`).
+
+        This used to be a bare `json.dump` into an open handle, which truncates
+        the destination before writing: a crash or a full disk halfway through
+        left a **valid-looking, truncated manifest file**. What is in here is
+        every asset's *effective split* - the routing table that decides who
+        gets paid - so a half-written one is not a cosmetic loss.
+
+        The default is still a JSON file at the same path with the same shape;
+        it is now written atomically and fsynced.
+
+        **One deliberate semantic change:** writing per-key makes this an upsert
+        rather than a whole-file replace, so a save merges with what is already
+        on disk instead of overwriting it. That is correct here rather than
+        merely convenient - asset ids are content-addressed, so a registration
+        only ever adds a key nothing else could be writing. Consequence to know:
+        this class has no removal API, and if it grows one, deletion will have to
+        be explicit rather than implied by absence.
+
+        **What it does NOT fix.** `bingo/register.py` is load -> mutate -> save,
+        and those are two separate store sessions - no transaction spans them.
+        The upsert shrinks the losing window from that whole span to the save
+        itself; it does not remove it, and under real contention the JSON backend
+        still drops registrations. Narrowing a race is not closing it, and a race
+        that fires rarely is the worse kind. `$BINGO_STORE=sqlite` is what
+        actually closes it, by serializing the saves. Demonstrated three ways in
+        `tests/test_node_storage.py`.
+        """
         os.makedirs(os.path.join(store_dir, "blobs"), exist_ok=True)
-        manifests = {aid: a.manifest() for aid, a in self._assets.items()}
-        with open(os.path.join(store_dir, "manifests.json"), "w") as f:
-            json.dump(manifests, f, indent=2)
+        st = store if store is not None else _store.node_store(
+            os.path.join(store_dir, "manifests"))
+        try:
+            with st.transaction():
+                for aid, a in self._assets.items():
+                    st.put(aid, a.manifest())
+        finally:
+            if store is None:
+                st.close()
         for h, blob in self._blobs.items():
             path = os.path.join(store_dir, "blobs", h)
             if not os.path.exists(path):
-                with open(path, "wb") as f:
+                # content-addressed: the name IS the hash, so a torn blob would
+                # simply fail its own check on load. Still written via a temp
+                # file so a truncated one can't masquerade as complete.
+                tmp = f"{path}.{os.getpid()}.tmp"
+                with open(tmp, "wb") as f:
                     f.write(blob)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
 
     @classmethod
-    def load(cls, store_dir: str) -> "AssetRegistry":
+    def load(cls, store_dir: str, *, store=None) -> "AssetRegistry":
         reg = cls()
-        mpath = os.path.join(store_dir, "manifests.json")
-        if not os.path.exists(mpath):
-            return reg
-        with open(mpath) as f:
-            manifests = json.load(f)
+        manifests = cls._read_manifests(store_dir, store)
         for aid, m in manifests.items():
             lic = m["license"]
             asset = Asset(
@@ -64,6 +101,27 @@ class AssetRegistry:
                 with open(bpath, "rb") as f:
                     reg._blobs[asset.content_sha256] = f.read()
         return reg
+
+    @staticmethod
+    def _read_manifests(store_dir: str, store) -> dict:
+        """Read the manifests, tolerating a registry written before the seam.
+
+        A file already on an operator's disk was written by the old code path
+        and must keep loading unchanged - a storage refactor that quietly
+        orphans existing assets is a data-loss event wearing a tidy diff.
+        """
+        if store is not None:
+            return dict(store.items())
+        # under the default backend this resolves to `manifests.json` - the exact
+        # path and shape the old code wrote, so legacy files load untouched. A
+        # RuntimeError here means BINGO_STORE selects a backend whose file is
+        # absent while the other one has data; let it propagate rather than
+        # silently loading an empty registry.
+        st = _store.node_store(os.path.join(store_dir, "manifests"))
+        try:
+            return dict(st.items())
+        finally:
+            st.close()
 
     # -- registration ------------------------------------------------------
 

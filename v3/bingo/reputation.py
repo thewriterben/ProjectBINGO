@@ -14,9 +14,18 @@ Spec: specs/ACCEPTANCE.md ("Reputation is a vector, not a scalar").
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass, field, asdict
+
+from . import store as _store
+
+
+def _base(path: str) -> str:
+    """`out/reputation.json` -> `out/reputation`, so `node_store` can pick the
+    extension that matches the backend. A caller who has always passed
+    `...json` keeps writing exactly that file under the default."""
+    root, ext = os.path.splitext(path)
+    return root if ext.lower() in (".json", ".db", ".sqlite", ".sqlite3") else path
 
 PROBATION_COMPLETIONS = 3          # completions before a node leaves probation
 PROBATION_MAX_JOB_CENTS = 5_000    # probationary nodes only take low-stakes work
@@ -160,20 +169,39 @@ class ReputationBook:
     def node_score(self, node_id: str, grade: str, process: str, prior: float = 0.5) -> float:
         return self.node(node_id, prior).score(grade, process)
 
-    def save(self, path: str):
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w") as f:
-            json.dump({"nodes": {k: v.to_dict() for k, v in self.nodes.items()},
-                       "buyers": {k: asdict(v) for k, v in self.buyers.items()}},
-                      f, indent=2)
+    def save(self, path: str, *, store=None):
+        """Persist through the storage seam (`bingo/store.py`).
+
+        Same upgrade as the asset registry: this was a bare `json.dump` into an
+        open handle, so a crash mid-write left a truncated book. It holds node
+        **stakes** as well as scores, which is real value at risk, and it is
+        read-modify-written by every settlement.
+
+        `path` keeps its meaning - the same JSON file, same shape, now written
+        atomically and fsynced.
+        """
+        st = store if store is not None else _store.node_store(_base(path))
+        try:
+            with st.transaction():
+                st.put("nodes", {k: v.to_dict() for k, v in self.nodes.items()})
+                st.put("buyers", {k: asdict(v) for k, v in self.buyers.items()})
+        finally:
+            if store is None:
+                st.close()
 
     @classmethod
-    def load(cls, path: str) -> "ReputationBook":
+    def load(cls, path: str, *, store=None) -> "ReputationBook":
         book = cls()
-        if not os.path.exists(path):
-            return book
-        with open(path) as f:
-            data = json.load(f)
+        if store is not None:
+            data = dict(store.items())
+        else:
+            # under the default backend `_base(path) + ".json"` is `path` itself,
+            # so a book written by the old code loads unchanged
+            st = _store.node_store(_base(path))
+            try:
+                data = dict(st.items())
+            finally:
+                st.close()
         for k, v in data.get("nodes", {}).items():
             book.nodes[k] = NodeRep(**v)
         for k, v in data.get("buyers", {}).items():

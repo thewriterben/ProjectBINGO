@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 
-from . import crypto
+from . import crypto, store
 from .models import Job, canonical_json, sha256_hex
 
 
@@ -35,11 +35,13 @@ def to_dict(job: Job, node_pubkey_hex: str) -> dict:
 
 
 def save(job: Job, node_pubkey_hex: str, out_dir: str) -> str:
+    """Write-once artifact, so a `Store` would be the wrong shape - but "written
+    once" is not "safe to write carelessly". A bare `json.dump` truncates the
+    destination first, and this file is the evidence a payout is justified by.
+    `atomic_write_json` is the floor: temp file, fsync, atomic rename."""
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{job.job_id}.json")
-    with open(path, "w") as f:
-        json.dump(to_dict(job, node_pubkey_hex), f, indent=2)
-    return path
+    return store.atomic_write_json(path, to_dict(job, node_pubkey_hex))
 
 
 def load(path: str) -> dict:

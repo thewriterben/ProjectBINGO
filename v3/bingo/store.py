@@ -408,7 +408,77 @@ class SqliteStore(Store):
         self._conn.close()
 
 
+# -- the primitive, for artifacts that are not keyed collections ---------------
+
+def atomic_write_json(path: str, obj, *, indent: int = 2,
+                      sort_keys: bool = False) -> str:
+    """Write a JSON file crash-safely: temp file, fsync, atomic rename.
+
+    Not everything BINGO persists is a keyed collection. A per-job evidence file
+    is a write-once artifact - a `Store` would be the wrong shape for it. But
+    "write-once" is not the same as "safe to write carelessly": a bare
+    `json.dump` into an open handle truncates the destination first, so a crash
+    or a full disk halfway through leaves a **valid-looking, truncated file**,
+    and the evidence for a completed job is the thing a payout is justified by.
+
+    This is the floor. Anything that holds state gets at least this.
+    """
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=indent, sort_keys=sort_keys)
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        retry_transient_io(lambda: os.replace(tmp, path))
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+    return path
+
+
 # -- choosing, moving, restoring -----------------------------------------------
+
+def node_store(base: str, *, backend: str | None = None, **kw) -> Store:
+    """Open one of a node's collections, letting the FILE NAME follow the
+    backend: `node_store("out/registry/manifests")` opens `manifests.json` by
+    default and `manifests.db` under `$BINGO_STORE=sqlite`.
+
+    This is what makes the backend a **node-level** decision instead of a
+    per-module one. Every collection a node keeps - the asset registry, the
+    reputation book, the payout journal - goes through here, so one environment
+    variable moves all of them together and there is no way to end up with half
+    a node transactional.
+
+    It also refuses a specific silent failure. If the selected backend's file is
+    missing but the *other* backend's file is there with data in it, that is
+    almost certainly an operator who flipped `$BINGO_STORE` without migrating.
+    Opening empty would be catastrophic and quiet: an empty asset registry reads
+    as "this creator has no assets and no splits", and an empty payout journal
+    reads as "nothing was ever paid". So it raises, and names the command that
+    fixes it.
+    """
+    choice = (backend or os.environ.get("BINGO_STORE") or "json").strip().lower()
+    if choice in ("sqlite", "sqlite3", "db"):
+        chosen, sibling, other = base + ".db", base + ".json", "json"
+    elif choice in ("json", "file"):
+        chosen, sibling, other = base + ".json", base + ".db", "sqlite"
+    else:
+        raise ValueError(f"unknown store backend {choice!r} "
+                         "(expected 'json' or 'sqlite')")
+    if not os.path.exists(chosen) and os.path.exists(sibling) \
+            and os.path.getsize(sibling) > 2:
+        raise RuntimeError(
+            f"{chosen} does not exist, but {sibling} does and has data in it.\n"
+            f"Refusing to start empty - an empty store reads as 'nothing was "
+            f"ever registered/paid', which is a dangerous lie.\n"
+            f"Migrate it first:\n"
+            f"    python -m bingo.node.migrate_store {base} --to {choice}\n"
+            f"or set BINGO_STORE={other} to keep using the existing one.")
+    return open_store(chosen, backend=choice, **kw)
+
 
 def open_store(path: str, *, backend: str | None = None, **kw) -> Store:
     """Pick a backend. JSON unless told otherwise, so no existing deployment

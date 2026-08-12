@@ -1,6 +1,6 @@
 # The storage seam
 
-_Status: implemented (`bingo/store.py`), 39/39 suites. Written 2026-08-12._
+_Status: implemented (`bingo/store.py`), wired into node state, 40/40 suites. Written 2026-08-12._
 
 ## The problem
 
@@ -146,13 +146,71 @@ Both are pinned by deterministic regressions - 6 processes x 25 write cycles,
 which catches the old code 6 times out of 6 - plus a unit test that the retry is
 bounded, re-raises the real error, and does not retry non-transient failures.
 
+## Wiring it in: one choice per node
+
+A seam only one module uses is a seam in name. `node_store(base)` opens a
+collection with the **file name following the backend** - `manifests.json` by
+default, `manifests.db` under `$BINGO_STORE=sqlite` - so one environment
+variable moves a node's whole state together and there is no way to end up with
+half a node transactional. Now behind it:
+
+- `AssetRegistry` (asset manifests, i.e. every **effective split**)
+- `ReputationBook` (scores and node **stakes**)
+- `PayoutEngine` (the journal, opt-in via `store=`)
+- `evidence.save` uses `atomic_write_json` rather than a Store - a per-job
+  evidence file is a write-once artifact, so a keyed collection is the wrong
+  shape, but "written once" is not "safe to write carelessly"
+
+### Two of these were never crash-safe
+
+`AssetRegistry.save` and `ReputationBook.save` were bare `json.dump` calls into
+an open handle, and `open(path, "w")` **truncates the destination first**. A
+crash, a full disk, or a killed process halfway through left a valid-looking
+partial file where the routing table used to be. Now a failed save loses the
+*new* state and never the old one, which is a completely different event.
+
+### Refusing to start empty
+
+If the selected backend's file is missing but the other backend's file is there
+with data in it, `node_store` **raises** and names the migration command. This is
+the same fail-closed reasoning as the corrupt-journal check: an empty asset
+registry reads as *"this creator has no assets and no splits"*, and starting
+clean would be both catastrophic and silent.
+
+`python -m bingo.node.migrate_store <base> --to sqlite|json` is that command. It
+verifies by reading every record back through a fresh connection rather than
+trusting that the copy loop didn't raise, refuses a destination that already
+exists (a second run would merge two histories irreversibly), and leaves the
+source byte-identical so `--to json` back out is always available.
+
+## Narrowing a race is not closing it
+
+The most useful thing this work produced is a correction to its own first
+conclusion, so it is recorded rather than quietly fixed.
+
+Routing the registry through a keyed store turns a whole-file **replace** into a
+per-key **upsert**. At four concurrent registrations that looked like the fix -
+the test passed, repeatedly. It is not the fix. `bingo/register.py` is
+load -> mutate -> save across two separate store sessions, and no transaction
+spans them; two JSON writers can still both read the same state, both merge
+their own key, and the later drop the earlier. The upsert shrank the window from
+the whole load-mutate-save span to the save itself.
+
+**A race that fires one time in twenty is worse than one that fires every time.**
+The obvious bug gets found in development; the rare one waits until there is
+money in the file. So the suite contends properly - 4 processes x 8
+registrations - and pins all three states: the old whole-file save loses assets,
+the seam on JSON *still* loses them, and only SQLite keeps every one.
+
 ## Still open
 
 - Nothing in the repo *defaults* to the transactional backend. That is
   deliberate for now, but the day a node settles real money from more than one
   process, `JsonStore` is the wrong choice and only the operator can make that
-  call.
-- Registry, ledger, and key-directory persistence still write JSON directly
-  rather than through the seam. They should move behind `Store` so the choice is
-  made once per node instead of once per module.
+  call - and as the race above shows, the JSON default is genuinely lossy under
+  concurrency, not merely theoretically so.
+- `provenance/coin.py`'s redemption ledger and anchor sidecar still write JSON
+  directly. They are already atomic, so this is tidiness rather than a hole, but
+  it means the coin vertical does not follow `$BINGO_STORE` with the rest of the
+  node yet.
 - No WAL archiving, so no true point-in-time recovery. See above.
