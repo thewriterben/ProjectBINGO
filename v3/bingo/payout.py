@@ -40,6 +40,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict
 
 from .models import canonical_json, sha256_hex
+from .store import retry_transient_io
 
 PENDING = "PENDING"
 PAID = "PAID"
@@ -244,32 +245,70 @@ class PayoutEngine:
     payouts survive a restart and still can't be repeated."""
 
     def __init__(self, rail: PayoutRail, journal_path: str | None = None,
-                 currency: str = "usd"):
+                 currency: str = "usd", store=None):
+        """`journal_path` is the original JSONL journal and remains the default:
+        existing files on existing disks keep working untouched.
+
+        `store` is the opt-in seam (`bingo.store.Store`). Pass a `SqliteStore`
+        and the journal gains real cross-process isolation - two settlement
+        processes racing on the same journal serialize instead of one silently
+        overwriting the other's PENDING intent. See `bingo/store.py` for why
+        atomic is not the same as isolated.
+        """
         self.rail = rail
         self.currency = currency
         self.journal_path = journal_path
+        self._store = store
         self._journal: dict[str, PayoutRecord] = {}
-        if journal_path and os.path.exists(journal_path):
+        if store is not None:
+            for _key, d in store.items():
+                self._journal[d["key"]] = PayoutRecord(**d)
+        elif journal_path and os.path.exists(journal_path):
             self._load()
 
     # -- persistence (best-effort; a corrupt line fails closed on load) --
     def _load(self) -> None:
-        with open(self.journal_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                d = json.loads(line)                 # corrupt journal -> raise (fail closed)
-                self._journal[d["key"]] = PayoutRecord(**d)
+        def _slurp() -> str:
+            with open(self.journal_path, "r", encoding="utf-8") as f:
+                return f.read()
+        # retried: on Windows, reading while another process swaps the journal
+        # raises PermissionError. See store.retry_transient_io.
+        for line in retry_transient_io(_slurp).splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            d = json.loads(line)                     # corrupt journal -> raise (fail closed)
+            self._journal[d["key"]] = PayoutRecord(**d)
 
-    def _persist(self) -> None:
+    def _persist(self, rec: "PayoutRecord | None" = None) -> None:
+        if self._store is not None:
+            # one record, one durable transaction. The two-phase protocol needs
+            # the PENDING intent to be on disk before the rail is called; with a
+            # transactional store "on disk" actually means committed and fsynced.
+            if rec is not None:
+                self._store.put(rec.key, asdict(rec))
+            else:
+                with self._store.transaction():
+                    for r in self._journal.values():
+                        self._store.put(r.key, asdict(r))
+            return
         if not self.journal_path:
             return
-        tmp = self.journal_path + ".tmp"
+        # unique scratch name per writer: a shared `.tmp` makes two concurrent
+        # settlement processes race to rename the same file, and the loser gets
+        # a FileNotFoundError *after* the rail call. See bingo/store.py.
+        tmp = f"{self.journal_path}.{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            for rec in self._journal.values():
-                f.write(json.dumps(asdict(rec)) + "\n")
-        os.replace(tmp, self.journal_path)           # atomic swap
+            for rec_ in self._journal.values():
+                f.write(json.dumps(asdict(rec_)) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            retry_transient_io(lambda: os.replace(tmp, self.journal_path))  # atomic
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
 
     def _drive(self, rec: PayoutRecord) -> PayoutRecord:
         """Two-phase: persist PENDING intent, call the rail, persist the outcome.
@@ -278,12 +317,12 @@ class PayoutEngine:
             return rec
         rec.status = PENDING
         self._journal[rec.key] = rec
-        self._persist()                              # intent committed BEFORE rail call
+        self._persist(rec)                           # intent committed BEFORE rail call
         res = self.rail.send(rec.key, rec.account, rec.amount_cents,
                              rec.currency, rec.memo)
         rec.attempts += 1
         rec.status, rec.external_ref, rec.error = res.status, res.external_ref, res.error
-        self._persist()
+        self._persist(rec)
         return rec
 
     def pay_legs(self, legs, *, order_id: str, job_id: str) -> list[PayoutRecord]:

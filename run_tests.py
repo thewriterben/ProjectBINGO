@@ -20,6 +20,7 @@ SUITE = [
     ("ed25519 self-test", "bingo.crypto", V3),
     ("key custody: generation, at-rest, rotation/revocation/recovery", "tests.test_key_custody", V3),
     ("signing path: audited constant-time vs pure-python kernel", "tests.test_signing_path", V3),
+    ("storage seam: json default, transactional sqlite opt-in", "tests.test_store", V3),
     ("external anchor: merkle transparency log + ordering proofs", "tests.test_anchor", V3),
     ("coin rollback closed by the external anchor", "tests.test_coin_anchor", V3),
     ("thin-vertical demo", "bingo.demo.run", V3),
